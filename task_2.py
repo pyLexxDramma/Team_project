@@ -1,7 +1,6 @@
 import vk_api
 from vk_api.longpoll import VkLongPoll, VkEventType
 from vk_api.utils import get_random_id
-import json
 import logging
 import psycopg2
 from psycopg2 import Error
@@ -11,18 +10,19 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import asyncio
 from functools import lru_cache
+from selenium import webdriver
+from selenium.webdriver.support.ui import WebDriverWait
+from urllib.parse import urlparse
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Замените на токен пользователя, а не группы
-TOKEN = 'str'
-GROUP_ID = 000
-
-access_token = 'str'
+TOKEN_GROUP = 'токен сообщества'
+GROUP_ID = 000  # id сообщества
+APPLICATION_ID = 000 # id приложения авторизации
 
 DB_NAME = "vkinder"
 DB_USER = "postgres"
-DB_PASSWORD = "str"
+DB_PASSWORD = "  пароль  "
 DB_HOST = "localhost"
 DB_PORT = "5432"
 
@@ -30,12 +30,40 @@ AGE_WEIGHT = 0.3
 INTERESTS_WEIGHT = 0.4
 FRIENDS_WEIGHT = 0.3
 
-vk_session = vk_api.VkApi(token=TOKEN)
+vk_session = vk_api.VkApi(token=TOKEN_GROUP)
 vk = vk_session.get_api()
 longpoll = VkLongPoll(vk_session, group_id=GROUP_ID)
 
-vk_session_user = vk_api.VkApi(token=access_token)
-vk_user = vk_session_user.get_api()
+def get_vk_token(APPLICATION_ID):
+       # Инициализация браузера (Chrome)
+    driver = webdriver.Chrome()
+    # Формирование URL для авторизации
+    auth_url = f"https://oauth.vk.com/authorize?client_id={APPLICATION_ID}&display=page&redirect_uri=https://example.com/callback&scope=friends&response_type=token&v=5.131&state=123456"
+    try:
+        # Открытие страницы авторизации
+        driver.get(auth_url)
+        # Ожидание, пока пользователь вручную нажмёт "Продолжить"
+        # Ждём, пока URL не изменится на редирект (примерно 60 секунд)
+        WebDriverWait(driver, 60).until(
+            lambda d: "example.com/callback" in d.current_url)
+        # Получаем URL после редиректа
+        redirect_url = driver.current_url
+        # Извлекаем access_token из URL
+        parsed_url = urlparse(redirect_url)
+        fragment = parsed_url.fragment
+        params = dict(param.split('=') for param in fragment.split('&'))
+        
+        if "access_token" in params:
+            access_token = params["access_token"]
+            return access_token
+        else:
+            print("Не удалось найти access_token в URL.")
+            return None
+    except Exception as e:
+        print(f"Произошла ошибка: {e}")
+        return None
+    finally:
+        driver.quit()
         
 user_states = {}
 current_search_results = {}
@@ -246,7 +274,11 @@ def get_city_id(city_name):
 
 def search_vk_users(conn, user_info, current_user_id):
     try:
-        
+        global vk_user
+        # нахождение access_token
+        vk_session_user = vk_api.VkApi(token=get_vk_token(APPLICATION_ID))
+        vk_user = vk_session_user.get_api()
+
         city_id = get_city_id(user_info['city'])
         
         params = {
