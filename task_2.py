@@ -15,12 +15,14 @@ from functools import lru_cache
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Замените на токен пользователя, а не группы
-TOKEN = "YOUR_USER_API_TOKEN"
-GROUP_ID = YOUR_GROUP_ID
+TOKEN = 'str'
+GROUP_ID = 000
+
+access_token = 'str'
 
 DB_NAME = "vkinder"
 DB_USER = "postgres"
-DB_PASSWORD = "YOUR_POSTGRES_PASSWORD"
+DB_PASSWORD = "str"
 DB_HOST = "localhost"
 DB_PORT = "5432"
 
@@ -32,6 +34,9 @@ vk_session = vk_api.VkApi(token=TOKEN)
 vk = vk_session.get_api()
 longpoll = VkLongPoll(vk_session, group_id=GROUP_ID)
 
+vk_session_user = vk_api.VkApi(token=access_token)
+vk_user = vk_session_user.get_api()
+        
 user_states = {}
 current_search_results = {}
 search_index = {}
@@ -39,13 +44,20 @@ search_index = {}
 def connect_db():
     try:
         conn = psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, host=DB_HOST, port=DB_PORT)
+        logging.info(f"Подключено к базе {DB_NAME} на {DB_HOST}")
         return conn
     except Error as e:
         logging.error(f"Ошибка подключения к базе данных: {e}")
+        
         return None
 
 def create_db_tables(conn):
     try:
+        
+        # cursor = conn.cursor()
+        # # Удаляем старые таблицы 
+        # cursor.execute("DROP TABLE IF EXISTS search_results, users, favorites, blacklist, user_interests")
+        
         cursor = conn.cursor()
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -76,6 +88,7 @@ def create_db_tables(conn):
             );
         """)
         conn.commit()
+        logging.info("Таблицы успешно созданы")
     except Error as e:
         logging.error(f"Ошибка при создании таблиц: {e}")
         conn.rollback()
@@ -192,6 +205,8 @@ def get_user_interests(user_id):
 
 def calculate_interests_similarity(user1_interests, user2_interests):
     try:
+        if not user1_interests.strip() or not user2_interests.strip():
+            return 0.0
         tfidf_vectorizer = TfidfVectorizer()
         tfidf_matrix = tfidf_vectorizer.fit_transform([user1_interests, user2_interests])
         similarity_score = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
@@ -202,7 +217,7 @@ def calculate_interests_similarity(user1_interests, user2_interests):
 
 async def fetch_friends(user_id):
     try:
-        response = await asyncio.to_thread(vk.friends.get, user_id=user_id)
+        response = await asyncio.to_thread(vk_user.friends.get, user_id=user_id)
         return response['items']
     except vk_api.exceptions.ApiError as e:
         logging.error(f"Ошибка при получении друзей пользователя {user_id}: {e}")
@@ -218,17 +233,32 @@ async def get_common_friends_count(user_id, target_user_id):
         logging.error(f"Ошибка при получении общих друзей: {e}")
         return 0
 
+def get_city_id(city_name):
+    """Получает ID города по названию"""
+    try:
+        response = vk_user.database.getCities(q=city_name, count=1)
+        if response['items']:
+            return response['items'][0]['id']
+        return None
+    except vk_api.exceptions.ApiError as e:
+        print(f"Ошибка при получении ID города: {e}")
+        return None
+
 def search_vk_users(conn, user_info, current_user_id):
     try:
+        
+        city_id = get_city_id(user_info['city'])
+        
         params = {
-            'city': user_info['city'],
+            'city': city_id,
             'age_from': user_info['age_from'],
             'age_to': user_info['age_to'],
             'sex': user_info['sex'],
-            'count': 1000,
-            'fields': 'city, sex, bdate, interests, music, books, groups'
+            'count': 10,
+            'fields': 'city, sex, bdate, interests, music, books, groups',
+            'status': 6  # В активном поиске
         }
-        response = vk.users.search(**params)
+        response = vk_user.users.search(**params)
         users = response['items']
         logging.info(f"Найдено пользователей: {len(users)}")
         filtered_users = []
@@ -343,6 +373,7 @@ def handle_blacklist_command(conn, user_id):
         send_message(user_id, "Сначала начните поиск, введя команду 'начать'.")
 
 def main():
+    
     conn = connect_db()
     if not conn:
         return
@@ -393,11 +424,11 @@ def main():
                                 score = evaluate_user(user_id, target_user, user_info, conn)
                                 
                                 try:
-                                     cursor = conn.cursor()
-                                     cursor.execute("INSERT INTO search_results (user_id, target_user_id, score) VALUES (%s, %s, %s)", (user_id, target_user['id'], score))
-                                     conn.commit()
+                                    cursor = conn.cursor()
+                                    cursor.execute("INSERT INTO search_results (user_id, target_user_id, score) VALUES (%s, %s, %s)", (user_id, target_user['id'], score))
+                                    conn.commit()
                                 except Exception as e:
-                                     logging.error(f"Ошибка при записи оценки пользователя в БД: {e}")
+                                    logging.error(f"Ошибка при записи оценки пользователя в БД: {e}")
 
                                 scored_users.append((target_user, score))
 
@@ -438,4 +469,6 @@ def main():
             conn.close()
 
 if __name__ == '__main__':
+    print('Бот запущен !')
     main()
+
