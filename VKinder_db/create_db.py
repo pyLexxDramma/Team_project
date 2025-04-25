@@ -111,6 +111,7 @@ def get_blacklist(vk_id):
             blacklist = session.query(Blacklist.vk_id_to_blacklist).join(Users, Users.id == Blacklist.user_id).\
                 filter(Users.vk_id == vk_id).all()
             return blacklist
+            session.close()
     except Exception:
         return ('Ошибка при выводе чёрного списка')
 
