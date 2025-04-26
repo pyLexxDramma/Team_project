@@ -9,8 +9,6 @@ from config import *
 from models import *
 import sqlalchemy
 from psycopg2 import Error
-import os
-
 
 # load_dotenv()
 
@@ -44,23 +42,6 @@ def create_tables(conn):
     except SQLAlchemyError  as e:
         logging.error(f"Ошибка при создании таблиц: {e}")
 
-# def create_db():
-#     """Создает все таблицы в базе данных.
-#     Использует подключение из переменной окружения DSN.
-#     В случае ошибки выводит сообщение в консоль.
-#     """
-#     try:
-#         engine = sqlalchemy.create_engine(DSN)
-#         Session = sessionmaker(bind=engine)
-#         session = Session()
-#         create_tables(engine)
-#         session.close()
-#     except Exception:
-#         print ('Ошибка создания БД')
-
-# # Создание таблиц
-# create_db()
-
 def init_db():
     """Инициализирует и возвращает сессию для работы с базой данных.
     Returns:
@@ -73,6 +54,7 @@ def init_db():
         Session = sessionmaker(bind=engine)
         session = Session()
         return session
+    
     except Exception:
         print ('Ошибка соединения')
 
@@ -93,8 +75,19 @@ def add_user(vk_id, first_name, age, sex, city):
             session.commit()
             session.close()
             return ('Пользователь добавлен в БД')
-    except Exception:
-        return ('Ошибка при добавлении пользователя')
+    except SQLAlchemyError  as e:
+        logging.error(f"Ошибка при добавлении пользователя {e}")
+
+def get_user_vk_id(user_id):
+    try:
+        with init_db() as session:
+            user = session.query(Users).filter_by(id=user_id).first()
+            if user:
+                return user.vk_id
+            return None
+    except SQLAlchemyError as e:
+        logging.error(f"Ошибка при получении vk_id пользователя {user_id}: {str(e)}")
+        raise
 
 def add_favourite(vk_id, first_name, last_name, user_id):
     """Добавляет пользователя в список избранных.

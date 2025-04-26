@@ -2,15 +2,14 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from vk_api.longpoll import VkLongPoll, VkEventType
 from vk_api.utils import get_random_id
-from BD_tokens import get_vk_token
 from functools import lru_cache
 from create_keyboard import *
 from psycopg2 import Error
+from BD_tokens import *
 from create_db import *
 from config import *
 from models import *
 import datetime
-import psycopg2
 import logging
 import asyncio
 import vk_api
@@ -236,7 +235,7 @@ def search_vk_users(conn, user_info, current_user_id):
     try:
         global vk_user
 
-        vk_session_user = vk_api.VkApi(token=get_vk_token(APPLICATION_ID))
+        vk_session_user = vk_api.VkApi(token=check_token(user_info['user_id']))
         vk_user = vk_session_user.get_api()
 
         city_id = get_city_id(user_info['city'])
@@ -398,6 +397,53 @@ def handle_blacklist_command(conn, user_id):
     else:
         send_message(user_id, "Сначала начните поиск, введя команду 'начать'.")
 
+def add_user_db(vk_user_info):
+    '''Обрабатывает и сохраняет данные пользователя VK в базу данных.'''
+    try:
+        vk_id = int(vk_user_info['id'])
+        first_name = str(vk_user_info.get('first_name', ''))[:20]
+        if not first_name:
+                    first_name = 'Неизвестно'
+                    
+        city = 'Не указан'
+        if 'city' in vk_user_info:
+            if isinstance(vk_user_info['city'], dict):
+                city = vk_user_info['city'].get('title', 'Не указан')
+            else:
+                city = str(vk_user_info['city'])
+                
+        age = 0  # Значение по умолчанию
+        if 'bdate' in vk_user_info and vk_user_info['bdate']:
+            bdate_parts = vk_user_info['bdate'].split('.')
+            if len(bdate_parts) == 3:  # Полная дата (день.месяц.год)
+                try:
+                    age = calculate_age(vk_user_info['bdate']) or 0
+                except Exception as e:
+                    logging.warning(f"Ошибка вычисления возраста: {e}")
+            else:
+                logging.info(f"Пользователь {vk_id}: указана неполная дата рождения")
+
+        sex = str(vk_user_info.get('sex', 0))
+        if sex == '1':
+            sex = 'женщина'
+        elif sex == '2':
+            sex = 'мужчина'
+        else:
+            sex = 'не известный'
+        sex = sex[:10]  
+
+        result = add_user(
+            vk_id=vk_id,
+            first_name=first_name,
+            age=age,
+            sex=sex,
+            city=city
+        )
+        logging.info(result)
+    except Exception as e: 
+        logging.info(f'Ошибка в добавление данных пользователя{e}')
+
+
 def main():
     """
     Основная функция бота: инициализирует БД и запускает бесконечный цикл обработки сообщений.
@@ -412,22 +458,30 @@ def main():
             if event.type == VkEventType.MESSAGE_NEW and event.to_me and event.text:
                 user_id = event.user_id
                 message_text = event.text.lower()
+                
+                vk_user_info = get_vk_user_info(user_id, fields=['first_name', 'city', 'bdate', 'sex'])
+                if vk_user_info:
+                    add_user_db(vk_user_info)
 
                 if not user_states.get(user_id) and message_text != 'начать':
                     keyboard = create_keyboard_start()
                     send_message(user_id, "Добро пожаловать! Нажмите 'Начать'.", keyboard=keyboard)
+              
                 elif message_text == 'начать':
                     user_states[user_id] = {"state": "waiting_for_city", "data": {}}
                     keyboard = create_keyboard_city()
                     send_message(user_id, "Выберите город:", keyboard=keyboard)
+                
                 elif user_id in user_states:
                     state = user_states[user_id]["state"]
                     user_data = user_states[user_id]["data"]
+                    
                     if state == "waiting_for_city":
                         user_data["city"] = message_text
                         user_states[user_id]["state"] = "waiting_for_sex"
                         keyboard = create_keyboard_sex()
                         send_message(user_id, "Выберите пол:", keyboard=keyboard)
+                  
                     elif state == "waiting_for_sex":
                         if message_text == "женский":
                             user_data["sex"] = 1
@@ -437,6 +491,7 @@ def main():
                             user_data["sex"] = 0
                         user_states[user_id]["state"] = "waiting_for_age"
                         send_message(user_id, "Введите возраст (или диапазон через тире, например 20-30):")
+                    
                     elif state == "waiting_for_age":
                         age_str = message_text
                         try:
@@ -447,6 +502,7 @@ def main():
 
                             user_info = {"user_id": user_id, "age_from": age_from, "age_to": age_to, "sex": user_data["sex"], "city": user_data["city"]}
                             search_users = search_vk_users(conn, user_info, user_id)
+                           
                             scored_users = []
                             for target_user in search_users:
                                 score = evaluate_user(user_id, target_user, user_info, conn)

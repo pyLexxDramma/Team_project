@@ -1,53 +1,16 @@
 import logging
-import psycopg2
-from psycopg2 import Error
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from urllib.parse import urlparse
+from config import *
+from create_db import *
+from datetime import datetime, timedelta, timezone
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-# def connect_db():
-#     try:
-#         conn = psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, host=DB_HOST, port=DB_PORT)
-#         return conn
-#     except Error as e:
-#         logging.error(f"Ошибка подключения к базе данных: {e}")
-#         return None
-
-# def create_token_table(conn):
-#     try:
-#         cursor = conn.cursor()
-#         cursor.execute("""
-#             CREATE TABLE IF NOT EXISTS tokens (
-#                 user_id INTEGER PRIMARY KEY,
-#                 access_token TEXT,
-#                 expires_in INTEGER,
-#                 token_created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-#                 FOREIGN KEY (user_id) REFERENCES users(user_id)
-#             );
-#         """)
-#         conn.commit()
-#     except Error as e:
-#         logging.error(f"Ошибка при создании таблицы токенов: {e}")
-#         conn.rollback()
-
-# def save_token(conn, user_id, access_token, expires_in):
-#     try:
-#         cursor = conn.cursor()
-#         cursor.execute("""
-#             INSERT INTO tokens (user_id, access_token, expires_in)
-#             VALUES (%s, %s, %s)
-#             ON CONFLICT (user_id) DO UPDATE SET access_token = EXCLUDED.access_token, expires_in = EXCLUDED.expires_in;
-#         """, (user_id, access_token, expires_in))
-#         conn.commit()
-#     except Error as e:
-#         logging.error(f"Ошибка при сохранении токена: {e}")
-#         conn.rollback()
 
 def get_vk_token(APPLICATION_ID):
     """
@@ -80,19 +43,44 @@ def get_vk_token(APPLICATION_ID):
     finally:
         driver.quit()
 
-# def check_token(conn, user_id):
-#     try:
-#         cursor = conn.cursor()
-#         cursor.execute("SELECT access_token, expires_in FROM tokens WHERE user_id = %s", (user_id,))
-#         token_data = cursor.fetchone()
-#         if token_data:
-#             access_token, expires_in = token_data
-#             # Проверка, не истек ли токен
-#             if expires_in > 0:
-#                 return access_token
-#             else:
-#                 logging.info("Токен истек, требуется новая авторизация.")
-#         return None
-#     except Error as e:
-#         logging.error(f"Ошибка при проверке токена: {e}")
-#         return None
+def check_token(user_id):
+    session = init_db()
+    try:
+        # 1. Проверяем последний токен пользователя
+        token_record = session.query(AccessTokenUser)\
+            .filter_by(user_id=user_id)\
+            .order_by(AccessTokenUser.data_time.desc())\
+            .first()
+        
+        # 2. Если токен есть и он свежий (меньше 23 часов) - возвращаем его
+        if token_record and (datetime.now(timezone.utc) - token_record.data_time < timedelta(hours=23)):
+            return token_record.access_token
+        
+        # 3. Получаем новый токен через VK OAuth
+        new_token = get_vk_token(APPLICATION_ID)
+        if not new_token:
+            logging.error("Не удалось получить новый токен")
+            return None
+            
+        # 4. Сохраняем в AccessTokenUser
+        if token_record:
+            # Обновляем существующую запись
+            token_record.access_token = new_token
+            token_record.data_time = datetime.now(timezone.utc)
+        else:
+            # Создаем новую запись
+            new_token_record = AccessTokenUser(
+                user_id=user_id,
+                access_token=new_token,
+                data_time=datetime.now(timezone.utc)
+            )
+            session.add(new_token_record)
+        
+        session.commit()
+        return new_token
+        
+    except Exception as e:
+        logging.error(f"Ошибка при проверке токена: {e}")
+        session.rollback()
+        return None        
+        

@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, ForeignKey
+from datetime import datetime, timezone
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, TEXT
 from sqlalchemy.orm import declarative_base, relationship
 
 
@@ -19,12 +20,12 @@ class Users(Base):
     id = Column(Integer, primary_key=True)
     vk_id = Column(Integer, unique=True, nullable=False)
     first_name = Column(String(length=20), nullable=False)
-    age = Column(Integer, nullable=False)
-    sex = Column(String(length=10), nullable=False)
-    city = Column(String, nullable=False)
+    age = Column(Integer)
+    sex = Column(String(length=10))
+    city = Column(String)
     
-    favorites = relationship("FavouriteUsers", back_populates="user", cascade="all, delete")
-    blacklists = relationship("Blacklist", back_populates="user", cascade="all, delete")
+    favorites = relationship("FavouriteUsers", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
+    blacklists = relationship("Blacklist", back_populates="user",  cascade="all, delete-orphan", passive_deletes=True)
     
     def __str__(self):
         """Строковое представление пользователя.
@@ -51,7 +52,7 @@ class FavouriteUsers(Base):
     user_id = Column(Integer, ForeignKey('users.id', ondelete="CASCADE"), nullable=False)
     
     user = relationship("Users", back_populates="favorites", cascade="all, delete")
-    photos = relationship("Photos", back_populates="favourite_user", cascade="all, delete")
+    photos = relationship("Photos", back_populates="favourite_user",  cascade="all, delete-orphan", passive_deletes=True)
 
     def __str__(self):
         """Строковое представление избранного пользователя.
@@ -76,7 +77,7 @@ class Photos(Base):
     photo_url = Column(String, unique=True, nullable=False)
     favourite_user_id = Column(Integer, ForeignKey('favourite_users.id', ondelete="CASCADE"), nullable=False)
    
-    favourite_users = relationship("FavouriteUsers", back_populates="photos", cascade="all, delete")
+    favourite_user = relationship("FavouriteUsers", back_populates="photos")
 
     def __str__(self):
         """Строковое представление фотографии.
@@ -101,7 +102,7 @@ class Blacklist(Base):
     user_id = Column(Integer, ForeignKey('users.id', ondelete="CASCADE"), nullable=False)
     vk_id_to_blacklist = Column(Integer, unique=True, nullable=False)
     
-    users = relationship("Users", back_populates="blacklists")
+    user = relationship("Users", back_populates="blacklists")
 
     def __str__(self):
         """Строковое представление записи в черном списке.
@@ -109,3 +110,16 @@ class Blacklist(Base):
             str: Форматированная строка с данными записи
         """
         return f'Blacklist {self.id}: {self.user_id}, {self.vk_id_to_blacklist}'
+    
+class AccessTokenUser(Base):
+    """Модель для хранения access token пользователей"""
+    
+    __tablename__ = 'access_token'
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete="CASCADE"))
+    access_token = Column(TEXT,unique=True)
+    data_time = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    
+    user = relationship("Users", backref="access_tokens")        
+        
