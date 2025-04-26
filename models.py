@@ -86,7 +86,6 @@ class Photos(Base):
         """
         return f'Photos {self.id}: {self.photo_url}, {self.favourite_user_id}'
 
-
 class Blacklist(Base):
     """Модель черного списка пользователей.
     Attributes:
@@ -117,7 +116,7 @@ class AccessTokenUser(Base):
     __tablename__ = 'access_token'
     
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id', ondelete="CASCADE"))
+    user_id = Column(Integer, ForeignKey('users.vk_id', ondelete="CASCADE"))
     access_token = Column(TEXT,unique=True)
     data_time = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     

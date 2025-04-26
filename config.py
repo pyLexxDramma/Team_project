@@ -1,13 +1,13 @@
 from sqlalchemy.engine.url import URL
 
-TOKEN_GROUP = "OCkkdw"
+TOKEN_GROUP = "vk1.a."
 
-GROUP_ID =  24  # id сообщества
-APPLICATION_ID = 96 # id приложения авторизации
+GROUP_ID =  2  # id сообщества
+APPLICATION_ID = 5 # id приложения авторизации
 
 DB_NAME = "vkinder"
 DB_USER = "postgres"
-DB_PASSWORD = "   "
+DB_PASSWORD = " "
 DB_HOST = "localhost"
 DB_PORT = "5432"
 

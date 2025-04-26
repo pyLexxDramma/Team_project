@@ -1,3 +1,4 @@
+from pprint import pprint
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from vk_api.longpoll import VkLongPoll, VkEventType
@@ -65,27 +66,6 @@ def handle_blacklist_command(conn, user_id, blacklisted_user_id):
         logging.error(f"Ошибка при добавлении в черный список: {e}")
         conn.rollback()
         send_message(user_id, "Ошибка при добавлении в черный список.")
-
-def is_user_blacklisted(conn, user_id, target_user_id):
-    """
-    Проверяет, находится ли пользователь в черном списке.
-    Args:
-        conn (psycopg2.connection): Соединение с БД.
-        user_id (int): ID пользователя, который проверяет ЧС.
-        target_user_id (int): ID пользователя, которого проверяют.
-    Returns:
-        bool: True, если пользователь в ЧС, иначе False.
-    """
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT 1 FROM blacklist WHERE user_id = %s AND blacklisted_user_id = %s",
-            (user_id, target_user_id)
-        )
-        return cursor.fetchone() is not None
-    except Error as e:
-        logging.error(f"Ошибка при проверке черного списка: {e}")
-        return False
 
 def get_vk_user_info(user_id, fields=None):
     """
@@ -251,10 +231,12 @@ def search_vk_users(conn, user_info, current_user_id):
         }
         response = vk_user.users.search(**params)
         users = response['items']
+        pprint(users)
         logging.info(f"Найдено пользователей: {len(users)}")
+        
         filtered_users = []
         for user_data in users:
-            if is_user_blacklisted(conn, current_user_id, user_data['id']):
+            if get_blacklist(user_data['id']):
                 continue
 
             age = calculate_age(user_data.get('bdate', ''))
@@ -502,7 +484,7 @@ def main():
 
                             user_info = {"user_id": user_id, "age_from": age_from, "age_to": age_to, "sex": user_data["sex"], "city": user_data["city"]}
                             search_users = search_vk_users(conn, user_info, user_id)
-                           
+
                             scored_users = []
                             for target_user in search_users:
                                 score = evaluate_user(user_id, target_user, user_info, conn)

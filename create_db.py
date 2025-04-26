@@ -1,16 +1,11 @@
 import logging
-import psycopg2
 from models import Users, FavouriteUsers, Photos, Blacklist
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import SQLAlchemyError
-from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from config import *
 from models import *
 import sqlalchemy
-from psycopg2 import Error
-
-# load_dotenv()
 
 def connect_db():
     """
@@ -35,7 +30,7 @@ def create_tables(conn):
         Перед созданием таблиц удаляет все существующие таблицы.
     """
     try: 
-        # Base.metadata.drop_all(conn)
+        # Base.metadata.drop_all(conn) # удаляет все таблицы 
         Base.metadata.create_all(conn)
         logging.info("Таблицы успешно созданы")
         
@@ -77,17 +72,6 @@ def add_user(vk_id, first_name, age, sex, city):
             return ('Пользователь добавлен в БД')
     except SQLAlchemyError  as e:
         logging.error(f"Ошибка при добавлении пользователя {e}")
-
-def get_user_vk_id(user_id):
-    try:
-        with init_db() as session:
-            user = session.query(Users).filter_by(id=user_id).first()
-            if user:
-                return user.vk_id
-            return None
-    except SQLAlchemyError as e:
-        logging.error(f"Ошибка при получении vk_id пользователя {user_id}: {str(e)}")
-        raise
 
 def add_favourite(vk_id, first_name, last_name, user_id):
     """Добавляет пользователя в список избранных.
@@ -161,7 +145,7 @@ def get_favourite(vk_id):
                 join(Users, Users.id == FavouriteUsers.user_id).\
                 filter(Users.vk_id == vk_id).all()
             return data
-            session.close()
+        session.close()
     except Exception:
         return ('Ошибка при выводе списка избранных')
 
@@ -177,7 +161,6 @@ def get_photo(vk_id):
             photos = session.query(Photos.photo_url).join(FavouriteUsers, FavouriteUsers.id == Photos.favourite_user_id).\
                 filter(FavouriteUsers.vk_id == vk_id).all()
             return photos
-            session.close()
     except Exception:
         return ('Ошибка при фото избранных')
 
@@ -190,10 +173,10 @@ def get_blacklist(vk_id):
     """
     try:
         with init_db() as session:
-            blacklist = session.query(Blacklist.vk_id_to_blacklist).join(Users, Users.id == Blacklist.user_id).\
-                filter(Users.vk_id == vk_id).all()
+            blacklist = session.query(Blacklist.vk_id_to_blacklist)\
+                .join(Users, Users.id == Blacklist.user_id)\
+               .filter(Users.vk_id == vk_id).all()
             return blacklist
-        session.close()
     except Exception:
         return ('Ошибка при выводе чёрного списка')
 
