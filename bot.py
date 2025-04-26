@@ -1,157 +1,41 @@
-import vk_api
-from vk_api.longpoll import VkLongPoll, VkEventType
-from vk_api.utils import get_random_id
-import logging
-import psycopg2
-from psycopg2 import Error
-import datetime
-from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import asyncio
+from vk_api.longpoll import VkLongPoll, VkEventType
+from vk_api.utils import get_random_id
+from BD_tokens import get_vk_token
 from functools import lru_cache
-from selenium import webdriver
-from selenium.webdriver.support.ui import WebDriverWait
-from urllib.parse import urlparse
+from create_keyboard import *
+from psycopg2 import Error
+from create_db import *
+from config import *
+from models import *
+import datetime
+import psycopg2
+import logging
+import asyncio
+import vk_api
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-TOKEN_GROUP = 'токен сообщества'
-GROUP_ID = 000  # id сообщества
-APPLICATION_ID = 000 # id приложения авторизации
-
-DB_NAME = "vkinder"
-DB_USER = "postgres"
-DB_PASSWORD = "  пароль  "
-DB_HOST = "localhost"
-DB_PORT = "5432"
-
-AGE_WEIGHT = 0.3
-INTERESTS_WEIGHT = 0.4
-FRIENDS_WEIGHT = 0.3
-
+# Инициализация VK API
 vk_session = vk_api.VkApi(token=TOKEN_GROUP)
 vk = vk_session.get_api()
 longpoll = VkLongPoll(vk_session, group_id=GROUP_ID)
 
-def get_vk_token(APPLICATION_ID):
-       # Инициализация браузера (Chrome)
-    driver = webdriver.Chrome()
-    # Формирование URL для авторизации
-    auth_url = f"https://oauth.vk.com/authorize?client_id={APPLICATION_ID}&display=page&redirect_uri=https://example.com/callback&scope=friends&response_type=token&v=5.131&state=123456"
-    try:
-        # Открытие страницы авторизации
-        driver.get(auth_url)
-        # Ожидание, пока пользователь вручную нажмёт "Продолжить"
-        # Ждём, пока URL не изменится на редирект (примерно 60 секунд)
-        WebDriverWait(driver, 60).until(
-            lambda d: "example.com/callback" in d.current_url)
-        # Получаем URL после редиректа
-        redirect_url = driver.current_url
-        # Извлекаем access_token из URL
-        parsed_url = urlparse(redirect_url)
-        fragment = parsed_url.fragment
-        params = dict(param.split('=') for param in fragment.split('&'))
-        
-        if "access_token" in params:
-            access_token = params["access_token"]
-            return access_token
-        else:
-            print("Не удалось найти access_token в URL.")
-            return None
-    except Exception as e:
-        print(f"Произошла ошибка: {e}")
-        return None
-    finally:
-        driver.quit()
-        
-user_states = {}
-current_search_results = {}
-search_index = {}
+# Глобальные переменные для хранения состояния        
+user_states = {}            # Текущее состояние пользователей (FSM)
+current_search_results = {} # Результаты поиска для каждого пользователя
+search_index = {}           # Индекс текущего просматриваемого результата
 
-def connect_db():
-    try:
-        conn = psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, host=DB_HOST, port=DB_PORT)
-        logging.info(f"Подключено к базе {DB_NAME} на {DB_HOST}")
-        return conn
-    except Error as e:
-        logging.error(f"Ошибка подключения к базе данных: {e}")
-        
-        return None
-
-def create_db_tables(conn):
-    try:
-        
-        # cursor = conn.cursor()
-        # # Удаляем старые таблицы 
-        # cursor.execute("DROP TABLE IF EXISTS search_results, users, favorites, blacklist, user_interests")
-        
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                age INTEGER,
-                sex INTEGER,
-                city TEXT
-            );
-            CREATE TABLE IF NOT EXISTS search_results (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER REFERENCES users(user_id),
-                target_user_id INTEGER,
-                score REAL
-            );
-            CREATE TABLE IF NOT EXISTS favorites (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER REFERENCES users(user_id),
-                favorite_user_id INTEGER
-            );
-            CREATE TABLE IF NOT EXISTS blacklist (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER REFERENCES users(user_id),
-                blacklisted_user_id INTEGER
-            );
-            CREATE TABLE IF NOT EXISTS user_interests (
-                user_id INTEGER PRIMARY KEY,
-                interests TEXT
-            );
-        """)
-        conn.commit()
-        logging.info("Таблицы успешно созданы")
-    except Error as e:
-        logging.error(f"Ошибка при создании таблиц: {e}")
-        conn.rollback()
-
-def create_keyboard_start():
-    keyboard = VkKeyboard(one_time=True)
-    keyboard.add_button("Начать", color=VkKeyboardColor.PRIMARY)
-    return keyboard.get_keyboard()
-
-def create_keyboard_city():
-    keyboard = VkKeyboard(one_time=True)
-    keyboard.add_button("Москва")
-    keyboard.add_button("Санкт-Петербург")
-    keyboard.add_line()
-    keyboard.add_button("Ижевск")
-    keyboard.add_button("Другой")
-    return keyboard.get_keyboard()
-
-def create_keyboard_sex():
-    keyboard = VkKeyboard(one_time=True)
-    keyboard.add_button("Женский")
-    keyboard.add_button("Мужской")
-    keyboard.add_line()
-    keyboard.add_button("Не важно")
-    return keyboard.get_keyboard()
-
-def create_keyboard_next_fav_black():
-    keyboard = VkKeyboard(one_time=True)
-    keyboard.add_button("Дальше", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("Избранное", color=VkKeyboardColor.POSITIVE)
-    keyboard.add_line()
-    keyboard.add_button("Черный список", color=VkKeyboardColor.NEGATIVE)
-    return keyboard.get_keyboard()
 
 def send_message(user_id, message, keyboard=None):
+    """
+    Отправляет сообщение пользователю в VK.
+    Args:
+        user_id (int): ID пользователя.
+        message (str): Текст сообщения.
+        keyboard (dict, optional): Клавиатура. Defaults to None.
+    """
     try:
         vk.messages.send(
             user_id=user_id,
@@ -163,6 +47,13 @@ def send_message(user_id, message, keyboard=None):
         logging.error(f"Ошибка при отправке сообщения: {e}")
 
 def handle_blacklist_command(conn, user_id, blacklisted_user_id):
+    """
+    Добавляет пользователя в черный список.
+    Args:
+        conn (psycopg2.connection): Соединение с БД.
+        user_id (int): ID пользователя, который добавляет в ЧС.
+        blacklisted_user_id (int): ID пользователя, которого добавляют в ЧС.
+    """
     try:
         cursor = conn.cursor()
         cursor.execute(
@@ -177,6 +68,15 @@ def handle_blacklist_command(conn, user_id, blacklisted_user_id):
         send_message(user_id, "Ошибка при добавлении в черный список.")
 
 def is_user_blacklisted(conn, user_id, target_user_id):
+    """
+    Проверяет, находится ли пользователь в черном списке.
+    Args:
+        conn (psycopg2.connection): Соединение с БД.
+        user_id (int): ID пользователя, который проверяет ЧС.
+        target_user_id (int): ID пользователя, которого проверяют.
+    Returns:
+        bool: True, если пользователь в ЧС, иначе False.
+    """
     try:
         cursor = conn.cursor()
         cursor.execute(
@@ -189,6 +89,14 @@ def is_user_blacklisted(conn, user_id, target_user_id):
         return False
 
 def get_vk_user_info(user_id, fields=None):
+    """
+    Получает информацию о пользователе VK.
+    Args:
+        user_id (int): ID пользователя.
+        fields (list, optional): Поля, которые нужно получить. Defaults to None.
+    Returns:
+        dict: Информация о пользователе или None в случае ошибки.
+    """
     try:
         user_info = vk.users.get(user_ids=user_id, fields=fields)
         logging.debug(f"get_vk_user_info({user_id}, {fields}): {user_info}")
@@ -201,6 +109,13 @@ def get_vk_user_info(user_id, fields=None):
         return None
 
 def calculate_age(birthdate_str):
+    """
+    Вычисляет возраст по дате рождения.
+    Args:
+        birthdate_str (str): Дата рождения в формате 'дд.мм.гггг'.
+    Returns:
+        int: Возраст или None в случае ошибки.
+    """
     try:
         birthdate = datetime.datetime.strptime(birthdate_str, '%d.%m.%Y')
         today = datetime.datetime.now()
@@ -211,6 +126,13 @@ def calculate_age(birthdate_str):
 
 @lru_cache(maxsize=128)
 def get_user_interests(user_id):
+    """
+    Получает интересы пользователя (кешируется).
+    Args:
+        user_id (int): ID пользователя.
+    Returns:
+        str: Строка с интересами, музыкой, книгами и группами.
+    """
     try:
         user_info = get_vk_user_info(user_id, fields=['interests', 'music', 'books', 'groups'])
         if not user_info:
@@ -232,6 +154,14 @@ def get_user_interests(user_id):
         return ''
 
 def calculate_interests_similarity(user1_interests, user2_interests):
+    """
+    Вычисляет схожесть интересов через TF-IDF и косинусное сходство.
+    Args:
+        user1_interests (str): Интересы первого пользователя.
+        user2_interests (str): Интересы второго пользователя.
+    Returns:
+        float: Оценка схожести (0.0–1.0).
+    """
     try:
         if not user1_interests.strip() or not user2_interests.strip():
             return 0.0
@@ -244,6 +174,13 @@ def calculate_interests_similarity(user1_interests, user2_interests):
         return 0.0
 
 async def fetch_friends(user_id):
+    """
+    Асинхронно получает список друзей пользователя.
+    Args:
+        user_id (int): ID пользователя.
+    Returns:
+        list: Список ID друзей или пустой список в случае ошибки.
+    """
     try:
         response = await asyncio.to_thread(vk_user.friends.get, user_id=user_id)
         return response['items']
@@ -252,6 +189,14 @@ async def fetch_friends(user_id):
         return []
 
 async def get_common_friends_count(user_id, target_user_id):
+    """
+    Считает количество общих друзей между двумя пользователями.
+    Args:
+        user_id (int): ID первого пользователя.
+        target_user_id (int): ID второго пользователя.
+    Returns:
+        int: Количество общих друзей.
+    """
     try:
         friends1 = await fetch_friends(user_id)
         friends2 = await fetch_friends(target_user_id)
@@ -262,7 +207,13 @@ async def get_common_friends_count(user_id, target_user_id):
         return 0
 
 def get_city_id(city_name):
-    """Получает ID города по названию"""
+    """
+    Получает ID города по названию.
+    Args:
+        city_name (str): Название города.
+    Returns:
+        int: ID города или None в случае ошибки.
+    """
     try:
         response = vk_user.database.getCities(q=city_name, count=1)
         if response['items']:
@@ -273,9 +224,18 @@ def get_city_id(city_name):
         return None
 
 def search_vk_users(conn, user_info, current_user_id):
+    """
+    Ищет пользователей VK по заданным критериям.
+    Args:
+        conn (psycopg2.connection): Соединение с БД.
+        user_info (dict): Параметры поиска (город, возраст, пол).
+        current_user_id (int): ID пользователя, который ищет.
+    Returns:
+        list: Список найденных пользователей.
+    """
     try:
         global vk_user
-        # нахождение access_token
+
         vk_session_user = vk_api.VkApi(token=get_vk_token(APPLICATION_ID))
         vk_user = vk_session_user.get_api()
 
@@ -310,6 +270,16 @@ def search_vk_users(conn, user_info, current_user_id):
         return []
 
 def evaluate_user(user_id, target_user, search_user_info, conn):
+    """
+    Оценивает пользователя по возрасту, интересам и общим друзьям.
+    Args:
+        user_id (int): ID оценивающего пользователя.
+        target_user (dict): Данные оцениваемого пользователя.
+        search_user_info (dict): Критерии поиска (возраст, город, пол).
+        conn (psycopg2.connection): Соединение с БД.
+    Returns:
+        float: Итоговая оценка (0.0–1.0).
+    """
     try:
         target_age = calculate_age(target_user.get('bdate', ''))
         if target_age is None:
@@ -332,6 +302,12 @@ def evaluate_user(user_id, target_user, search_user_info, conn):
         return 0.0
 
 def handle_next_command(conn, user_id):
+    """
+    Обрабатывает команду "Дальше" (показывает следующего пользователя).
+    Args:
+        conn (psycopg2.connection): Соединение с БД.
+        user_id (int): ID пользователя.
+    """
     global search_index, current_search_results
     if user_id in current_search_results:
         search_index[user_id] = search_index.get(user_id, 0) + 1
@@ -354,6 +330,12 @@ def handle_next_command(conn, user_id):
         send_message(user_id, "Сначала начните поиск, введя команду 'начать'.")
 
 def handle_favorites_command(conn, user_id):
+    """
+    Добавляет текущего пользователя в избранное.
+    Args:
+        conn (psycopg2.connection): Соединение с БД.
+        user_id (int): ID пользователя.
+    """
     if user_id in current_search_results and search_index.get(user_id) is not None:
         target_user = current_search_results[user_id][search_index[user_id]]
         try:
@@ -369,6 +351,12 @@ def handle_favorites_command(conn, user_id):
         send_message(user_id, "Сначала начните поиск, введя команду 'начать'.")
 
 def handle_show_favorites_command(conn, user_id):
+    """
+    Показывает список избранных пользователей.
+    Args:
+        conn (psycopg2.connection): Соединение с БД.
+        user_id (int): ID пользователя.
+    """
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT favorite_user_id FROM favorites WHERE user_id = %s", (user_id,))
@@ -390,6 +378,12 @@ def handle_show_favorites_command(conn, user_id):
         send_message(user_id, "Ошибка при получении списка избранных.")
 
 def handle_blacklist_command(conn, user_id):
+    """
+    Добавляет текущего пользователя в черный список.
+    Args:
+        conn (psycopg2.connection): Соединение с БД.
+        user_id (int): ID пользователя.
+    """
     if user_id in current_search_results and search_index.get(user_id) is not None:
         target_user = current_search_results[user_id][search_index[user_id]]
         try:
@@ -405,11 +399,13 @@ def handle_blacklist_command(conn, user_id):
         send_message(user_id, "Сначала начните поиск, введя команду 'начать'.")
 
 def main():
-    
+    """
+    Основная функция бота: инициализирует БД и запускает бесконечный цикл обработки сообщений.
+    """
     conn = connect_db()
     if not conn:
-        return
-    create_db_tables(conn)
+        raise RuntimeError("Не удалось подключиться к базе данных")
+    create_tables(conn)
     global current_search_results, search_index
     try:
         for event in longpoll.listen():
