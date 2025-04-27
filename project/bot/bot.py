@@ -6,7 +6,7 @@ from vk_api.utils import get_random_id
 from functools import lru_cache
 from create_keyboard import *
 from psycopg2 import Error
-from BD_tokens import *  # Убедитесь, что имя файла правильное
+from BD_tokens import *
 from create_db import *
 from config import *
 from models import *
@@ -18,7 +18,7 @@ import vk_api
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Инициализация VK API
-vk_session = vk_api.VkApi(token=TOKEN_GROUP)  # Убедитесь, что TOKEN_GROUP заполнен
+vk_session = vk_api.VkApi(token=TOKEN_GROUP) 
 vk = vk_session.get_api()
 longpoll = VkLongPoll(vk_session, group_id=GROUP_ID)
 
