@@ -1,1 +1,1 @@
-Исправлено: В классе AccessTokenUser, user_id теперь является внешним ключом, ссылающимся на users.id вместо users.vk_id.
+- *Исправлено:* В классе AccessTokenUser, user_id теперь является внешним ключом, ссылающимся на users.id вместо users.vk_id.
