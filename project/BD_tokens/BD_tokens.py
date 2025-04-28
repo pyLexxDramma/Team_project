@@ -52,8 +52,13 @@ def check_token(user_id):
             .first()
 
         # 2. Если токен есть и он свежий (меньше 23 часов) - возвращаем его
-        if token_record and (datetime.now(timezone.utc) - token_record.data_time < timedelta(hours=23)):
-            return token_record.access_token
+        if token_record: #  Проверяем, что token_record не None
+            token_data_time = token_record.data_time #  Получаем дату из записи
+            if token_data_time.tzinfo is None: # Если у даты нет информации о часовом поясе, то добавляем UTC
+                  token_data_time = token_data_time.replace(tzinfo=timezone.utc)
+
+            if (datetime.now(timezone.utc) - token_data_time < timedelta(hours=23)): #  Сравниваем с текущим временем в UTC
+                return token_record.access_token
 
         # 3. Получаем новый токен через VK OAuth
         new_token = get_vk_token(APPLICATION_ID)
