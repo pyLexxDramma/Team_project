@@ -1,13 +1,15 @@
 import sqlalchemy
 from sqlalchemy.orm import sessionmaker
 import os
-from models import create_tables, Users, FavouriteUsers, Favourite, Photos, BlacklistUsers, Blacklist
+from models import create_tables, Users, AccessToken, FavouriteUsers, Favourite, Photos, BlacklistUsers, Blacklist
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Функция создание таблиц
-# В переменную DNS подставить путь с БД на своём компьютере, либо создать текстовый файл '.env' и записать путь туда
+'''
+Функция создание таблиц
+В переменную DNS подставить путь с БД на своём компьютере, либо создать текстовый файл '.env' и записать путь туда
+'''
 def create_db():
     try:
         DNS = os.getenv('DNS')
@@ -19,12 +21,16 @@ def create_db():
     except Exception:
         print ('Ошибка создания БД')
 
-# Создание таблиц
-# Создание таблиц происходит сдесь, отдельно от основного модуля программы,
-# чтобы данные пользователей не обнуляли при перезапуске программы
+'''
+Создание таблиц
+Создание таблиц происходит сдесь, отдельно от основного модуля программы,
+чтобы данные пользователей не обнуляли при перезапуске программы
+'''
 create_db()
 
-# Открытие сессии
+'''
+Открытие сессии
+'''
 def init_db():
     try:
         DNS = os.getenv('DNS')
@@ -35,12 +41,14 @@ def init_db():
     except Exception:
         print ('Ошибка соединения')
 
-# Добавление пользователя с которым общается бот в БД
-# vk_id - vk_id пользователя
-# first_name - имя
-# age - возраст
-# sex - пол
-# city - город
+'''
+Добавление пользователя с которым общается бот в БД
+vk_id - vk_id пользователя
+first_name - имя
+age - возраст
+sex - пол
+city - город
+'''
 def add_user(vk_id, first_name, age, sex, city):
     try:
         with init_db() as session:
@@ -51,11 +59,23 @@ def add_user(vk_id, first_name, age, sex, city):
     except Exception:
         return 'Ошибка при добавлении пользователя'
 
-# Добавление в список избранных
-# vk_id - vk_id пользователя, которого добавляют в избранное
-# first_name - имя пользователя, которого добавляют в избранное
-# last_name - фамилия пользователя, которого добавляют в избранное
-# user_id - vk_id пользователя с которым общается бот
+def add_token(token, date, vk_id):
+    try:
+        with init_db() as session:
+            session.add(AccessToken(token=token, date=date, user_id=vk_id))
+            session.commit()
+            session.close()
+            return 'Токен пользователь добавлен в БД'
+    except Exception:
+        return 'Ошибка при добавлении токена пользователя'
+
+'''
+Добавление в список избранных
+vk_id - vk_id пользователя, которого добавляют в избранное
+first_name - имя пользователя, которого добавляют в избранное
+last_name - фамилия пользователя, которого добавляют в избранное
+user_id - vk_id пользователя с которым общается бот
+'''
 def add_favourite(vk_id, first_name, last_name, user_id):
     try:
         with init_db() as session:
@@ -71,10 +91,12 @@ def add_favourite(vk_id, first_name, last_name, user_id):
     except Exception:
         return ('Ошибка при добавлении в избранное')
 
-# Добавление ссылок на фото. При сохранении профиля в избранное, программа добавляет самые популярные фото к нему.
-#  Каждому профилю из списка  избранное соответствует уникальная url на фото (одна или несколько).
-# photo_url - ссылка на фото
-# favourite_user_id - vk_id профиля избранного
+'''
+Добавление ссылок на фото. При сохранении профиля в избранное, программа добавляет самые популярные фото к нему.
+Каждому профилю из списка  избранное соответствует уникальная url на фото (одна или несколько).
+photo_url - ссылка на фото
+favourite_user_id - vk_id профиля избранного
+'''
 def add_photo(photo_url, favourite_user_id):
     try:
         with init_db() as session:
@@ -85,11 +107,13 @@ def add_photo(photo_url, favourite_user_id):
     except Exception:
         return ('Ошибка при добавлении фото')
 
-# Добавление в чёрный список
-# vk_id - vk_id пользователя, которого добавляют в чёрный список
-# first_name - имя пользователя, которого добавляют в чёрный список
-# last_name - фамилия пользователя, которого добавляют в чёрный список
-# user_id - vk_id пользователя с которым общается бот
+'''
+Добавление в чёрный список
+vk_id - vk_id пользователя, которого добавляют в чёрный список
+first_name - имя пользователя, которого добавляют в чёрный список
+last_name - фамилия пользователя, которого добавляют в чёрный список
+user_id - vk_id пользователя с которым общается бот
+'''
 def add_blacklist(vk_id, first_name, last_name, user_id):
     try:
         with init_db() as session:
@@ -105,8 +129,25 @@ def add_blacklist(vk_id, first_name, last_name, user_id):
     except Exception:
         return ('Ошибка при добавлении в чёрный список')
 
-# Получение списка избранных
-# vk_id - vk_id пользователя с которым общается бот
+'''
+Получение токена и даты действия
+'''
+def get_token(vk_id):
+    try:
+        with init_db() as session:
+            info = session.query(AccessToken.token, AccessToken.date).filter(AccessToken.user_id == vk_id).all()
+            token = info[0][0]
+            date = info[0][1]
+            session.close()
+            return f'{token}, {date}'
+    except Exception:
+        return ('Ошибка при выводе списка избранных')
+
+
+'''
+Получение списка избранных
+vk_id - vk_id пользователя с которым общается бот
+'''
 def get_favourite(vk_id):
     try:
         with init_db() as session:
@@ -119,8 +160,10 @@ def get_favourite(vk_id):
     except Exception:
         return ('Ошибка при выводе списка избранных')
 
-# Получение фото
-# vk_id - vk_id избранного пользователя
+'''
+Получение фото
+vk_id - vk_id избранного пользователя
+'''
 def get_photo(vk_id):
     try:
         with init_db() as session:
@@ -131,8 +174,10 @@ def get_photo(vk_id):
     except Exception:
         return ('Ошибка при получении фото избранных')
 
-# Получение чёрного списка
-# vk_id - vk_id пользователя с которым общается бот
+'''
+Получение чёрного списка
+vk_id - vk_id пользователя с которым общается бот
+'''
 def get_blacklist(vk_id):
     try:
         with init_db() as session:
@@ -145,9 +190,11 @@ def get_blacklist(vk_id):
     except Exception:
         return ('Ошибка при выводе чёрного списка')
 
-# Удаление профиля из списка избранных
-# vk_id - vk_id профиля в избранном
-# user_id - - vk_id пользователя с которым общается бот
+'''
+Удаление профиля из списка избранных
+vk_id - vk_id профиля в избранном
+user_id - - vk_id пользователя с которым общается бот
+'''
 def delete_favourite(vk_id, user_id):
     try:
         with init_db() as session:
@@ -160,9 +207,11 @@ def delete_favourite(vk_id, user_id):
     except Exception:
         return ('Ошибка при удалении из списка избранного')
 
-# Удаление профиля из чёрного списка
-# vk_id - vk_id профиля в чёрном списке
-# user_id - - vk_id пользователя с которым общается бот
+'''
+Удаление профиля из чёрного списка
+vk_id - vk_id профиля в чёрном списке
+user_id - - vk_id пользователя с которым общается бот
+'''
 def delete_blacklist(vk_id, user_id):
     try:
         with init_db() as session:
@@ -174,6 +223,4 @@ def delete_blacklist(vk_id, user_id):
             return 'Профиль удалён из чёрного списка'
     except Exception:
         return ('Ошибка при удалении из чёрного списка')
-
-
 

@@ -1,6 +1,7 @@
 import sqlalchemy as sq
-from sqlalchemy import ForeignKey
+from sqlalchemy import ForeignKey, DateTime
 from sqlalchemy.orm import declarative_base, relationship
+from datetime import datetime
 
 Base = declarative_base()
 
@@ -16,6 +17,18 @@ class Users(Base):
     def __str__(self):
         return f'User {self.id}: {self.first_name}, {self.age}, {self.sex}, {self.city}'
 
+class AccessToken(Base):
+    __tablename__ = 'access_token'
+
+    id = sq.Column(sq.Integer, primary_key=True, nullable=False)
+    token = sq.Column(sq.Text, unique=True, nullable=False)
+    date = sq.Column(sq.DateTime,default=datetime.utcnow, nullable=False)
+    user_id = sq.Column(sq.Integer, ForeignKey('users.id'))
+
+    users = relationship(Users, backref='id_users')
+
+    def __str__(self):
+        return f'AccessToken {self.id}: {self.token}, {self.user_id}, {self.date}'
 
 class FavouriteUsers(Base):
     __tablename__ = 'favourite_users'
@@ -37,6 +50,9 @@ class Favourite(Base):
 
     users = relationship(Users, backref='us_id')
     favourite_users = relationship(FavouriteUsers, backref='favourite_us_id')
+
+    def __str__(self):
+        return f'Favourite {self.id}: {self.user_id}, {self.favourite_user_id}'
 
 
 class Photos(Base):
@@ -72,6 +88,9 @@ class Blacklist(Base):
 
     users = relationship(Users, backref='id_user')
     blacklist_users = relationship(BlacklistUsers, backref='id_blacklist_user')
+
+    def __str__(self):
+        return f'Blacklist {self.id}: {self.user_id}, {self.blacklist_user_id}'
 
 
 def create_tables(engine):

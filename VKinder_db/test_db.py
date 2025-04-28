@@ -1,6 +1,6 @@
 import pytest
 from create_db import add_user, add_favourite, add_photo, add_blacklist, get_favourite, get_blacklist, get_photo,\
-    delete_favourite, delete_blacklist
+    delete_favourite, delete_blacklist, add_token, get_token
 
 
 def generate_add_user():
@@ -12,6 +12,14 @@ def generate_add_user():
 @pytest.mark.parametrize('a,b,c,d,e,expected', generate_add_user())
 def test_add_user(a, b, c, d, e, expected):
     assert add_user(a, b, c, d, e) == expected
+
+def generate_add_token():
+    token = 'vk1.a.y94ZySf2OFXIYr4ja2nAFz6j37CJCBzgeqb9L_uM7qp4L2eDtKAdW0huVW4SJIMTaInlKVPPJHjo7sgjeWEnlm65nZSOlA98uO-xmGJJHNDKbyAzjP-CRVq0sy9W7U62w-xSLWqnPAsOLU9nBXrJC_4SYWOsqzRLrStx7hMm1HziPawRZRQF1w5V8Z8VzdP2rwRcptpJUOJdEkzVDO-ZTA'
+    yield token, '2025-04-26 19:00:09.018862+05:00', 547465, 'Токен пользователь добавлен в БД'
+
+@pytest.mark.parametrize('a, b, c, expected', generate_add_token())
+def test_add_token(a, b, c, expected):
+    assert add_token(a, b, c) == expected
 
 
 def generate_add_favourite():
@@ -48,6 +56,15 @@ def generate_add_blacklist():
 @pytest.mark.parametrize('a, b, c, d, expected', generate_add_blacklist())
 def test_add_blacklist(a, b, c, d, expected):
     assert add_blacklist(a, b, c, d) == expected
+
+
+def generate_get_token():
+    yield 547465, ('vk1.a.y94ZySf2OFXIYr4ja2nAFz6j37CJCBzgeqb9L_uM7qp4L2eDtKAdW0huVW4SJIMTaInlKVPPJHjo7sgjeWEnlm65nZSOlA98uO-xmGJJHNDKbyAzjP-CRVq0sy9W7U62w-xSLWqnPAsOLU9nBXrJC_4SYWOsqzRLrStx7hMm1HziPawRZRQF1w5V8Z8VzdP2rwRcptpJUOJdEkzVDO-ZTA, '
+                '2025-04-26 19:00:09.018862')
+
+@pytest.mark.parametrize('a, expected', generate_get_token())
+def test_get_token(a, expected):
+    assert get_token(a) == expected
 
 
 def generate_get_favourite():
