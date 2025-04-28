@@ -1,0 +1,11 @@
+
+TOKEN_GROUP = "  "
+
+GROUP_ID =  23  # id сообщества
+APPLICATION_ID = 53 # id приложения авторизации
+
+DB_NAME = "vkinder"
+DB_USER = "postgres"
+DB_PASSWORD = " "
+DB_HOST = "localhost"
+DB_PORT = "5432"
