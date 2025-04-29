@@ -2,9 +2,10 @@ import logging
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from urllib.parse import urlparse
-from config import *
-from create_db import *
+from config.config import *
 from datetime import datetime, timedelta, timezone
+from VKinder_db.models import*
+from VKinder_db.create_db import *
 from sqlalchemy.exc import SQLAlchemyError  # Import SQLAlchemyError
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -46,19 +47,19 @@ def check_token(user_id):
     session = init_db()
     try:
         # 1. Проверяем последний токен пользователя
-        token_record = session.query(AccessTokenUser) \
+        token_record = session.query(AccessToken) \
             .filter_by(user_id=user_id) \
-            .order_by(AccessTokenUser.data_time.desc()) \
+            .order_by(AccessToken.date.desc()) \
             .first()
 
         # 2. Если токен есть и он свежий (меньше 23 часов) - возвращаем его
         if token_record: #  Проверяем, что token_record не None
-            token_data_time = token_record.data_time #  Получаем дату из записи
+            token_data_time = token_record.date   #  Получаем дату из записи
             if token_data_time.tzinfo is None: # Если у даты нет информации о часовом поясе, то добавляем UTC
                   token_data_time = token_data_time.replace(tzinfo=timezone.utc)
 
             if (datetime.now(timezone.utc) - token_data_time < timedelta(hours=23)): #  Сравниваем с текущим временем в UTC
-                return token_record.access_token
+                return token_record.token
 
         # 3. Получаем новый токен через VK OAuth
         new_token = get_vk_token(APPLICATION_ID)
@@ -67,17 +68,17 @@ def check_token(user_id):
             return None
 
         # 4. Сохраняем в AccessTokenUser
-        try:  # Добавлена обработка исключений
+        try:  
             if token_record:
                 # Обновляем существующую запись
-                token_record.access_token = new_token
-                token_record.data_time = datetime.now(timezone.utc)
+                token_record.token  = new_token
+                token_record.date = datetime.now(timezone.utc)
             else:
                 # Создаем новую запись
-                new_token_record = AccessTokenUser(
+                new_token_record = AccessToken(
                     user_id=user_id,
-                    access_token=new_token,
-                    data_time=datetime.now(timezone.utc)
+                    token=new_token,
+                    date=datetime.now(timezone.utc)
                 )
                 session.add(new_token_record)
 

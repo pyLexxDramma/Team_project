@@ -1,18 +1,21 @@
 from pprint import pprint
+import random
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from vk_api.longpoll import VkLongPoll, VkEventType
 from vk_api.utils import get_random_id
 from functools import lru_cache
-from create_keyboard import *
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent)) 
+from create_keyboard.create_keyboard import *
 from psycopg2 import Error
-from BD_tokens import *
-from create_db import *
-from config import *
-from models import *
+from BD_tokens.BD_tokens import *
+from config.config import *
+from VKinder_db.create_db import* 
+from VKinder_db.models import* 
 import datetime
 import logging
-import asyncio
 import vk_api
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -66,66 +69,6 @@ def calculate_age(birthdate_str):
         return None
 
 
-@lru_cache(maxsize=128)
-def get_user_interests(user_id):
-    """Получает интересы пользователя (кешируется)."""
-    try:
-        user_info = get_vk_user_info(user_id, fields=['interests', 'music', 'books', 'groups'])
-        if not user_info:
-            return ''
-
-        interests = user_info.get('interests', '') + ' ' + user_info.get('music', '') + ' ' + user_info.get('books', '')
-        group_ids = user_info.get('groups', '')
-
-        if group_ids:
-            groups = ','.join(group_ids.split(','))
-        else:
-            groups = ''
-
-        interests += groups
-
-        return interests
-    except Exception as e:
-        logging.error(f"Ошибка при получении интересов пользователя: {e}")
-        return ''
-
-
-def calculate_interests_similarity(user1_interests, user2_interests):
-    """Вычисляет схожесть интересов через TF-IDF и косинусное сходство."""
-    try:
-        if not user1_interests.strip() or not user2_interests.strip():
-            return 0.0
-        tfidf_vectorizer = TfidfVectorizer()
-        tfidf_matrix = tfidf_vectorizer.fit_transform([user1_interests, user2_interests])
-        similarity_score = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
-        return similarity_score
-    except Exception as e:
-        logging.error(f"Ошибка при вычислении схожести интересов: {e}")
-        return 0.0
-
-
-async def fetch_friends(user_id):
-    """Асинхронно получает список друзей пользователя."""
-    try:
-        response = await asyncio.to_thread(vk_user.friends.get, user_id=user_id)
-        return response['items']
-    except vk_api.exceptions.ApiError as e:
-        logging.error(f"Ошибка при получении друзей пользователя {user_id}: {e}")
-        return []
-
-
-async def get_common_friends_count(user_id, target_user_id):
-    """Считает количество общих друзей между двумя пользователями."""
-    try:
-        friends1 = await fetch_friends(user_id)
-        friends2 = await fetch_friends(target_user_id)
-        common_friends = set(friends1) & set(friends2)
-        return len(common_friends)
-    except Exception as e:
-        logging.error(f"Ошибка при получении общих друзей: {e}")
-        return 0
-
-
 def get_city_id(city_name):
     """Получает ID города по названию."""
     try:
@@ -138,7 +81,7 @@ def get_city_id(city_name):
         return None
 
 
-def search_vk_users(conn, user_info, current_user_id):
+def search_vk_users(user_info):
     """Ищет пользователей VK по заданным критериям."""
     try:
         global vk_user
@@ -154,12 +97,11 @@ def search_vk_users(conn, user_info, current_user_id):
             'age_to': user_info['age_to'],
             'sex': user_info['sex'],
             'count': 10,
-            'fields': 'city, sex, bdate, interests, music, books, groups',
+            'fields': 'city, sex, bdate, interests, music, books, groups, crop_photo',
             'status': 6  # В активном поиске
         }
         response = vk_user.users.search(**params)
         users = response['items']
-        pprint(users)
         logging.info(f"Найдено пользователей: {len(users)}")
 
         filtered_users = []
@@ -177,71 +119,6 @@ def search_vk_users(conn, user_info, current_user_id):
     except vk_api.exceptions.ApiError as e:
         logging.error(f"Ошибка при поиске пользователей: {e}")
         return []
-
-
-def evaluate_user(user_id, target_user, search_user_info, conn):
-    """Оценивает пользователя по возрасту, интересам и общим друзьям."""
-    try:
-        target_age = calculate_age(target_user.get('bdate', ''))
-        if target_age is None:
-            return 0.0
-        age_diff = abs(search_user_info['age_from'] - target_age) if target_age else 100
-        age_score = 1 - (age_diff / 100)
-
-        search_user_interests = get_user_interests(search_user_info['user_id'])
-        target_user_interests = get_user_interests(target_user['id'])
-        interests_similarity = calculate_interests_similarity(search_user_interests, target_user_interests)
-
-        common_friends_count = asyncio.run(get_common_friends_count(search_user_info['user_id'], target_user['id']))
-
-        friends_score = common_friends_count / 100 if common_friends_count <= 100 else 1
-        final_score = (AGE_WEIGHT * age_score) + (INTERESTS_WEIGHT * interests_similarity) + (FRIENDS_WEIGHT * friends_score)
-
-        return final_score
-    except Exception as e:
-        logging.error(f"Ошибка при оценке пользователя: {e}")
-        return 0.0
-
-
-def get_user_score(conn, user_id, target_user_id):
-    """Получает оценку пользователя из БД."""
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT score FROM search_results WHERE user_id = %s AND target_user_id = %s",
-            (user_id, target_user_id)
-        )
-        result = cursor.fetchone()
-        if result:
-            return result[0]
-        else:
-            return None
-    except Exception as e:
-        logging.error(f"Ошибка при получении оценки пользователя из БД: {e}")
-        return None
-
-
-def handle_next_command(conn, user_id):
-    """Обрабатывает команду "Дальше" (показывает следующего пользователя)."""
-    global search_index, current_search_results
-    if user_id in current_search_results:
-        search_index[user_id] = search_index.get(user_id, 0) + 1
-        if search_index[user_id] < len(current_search_results[user_id]):
-            target_user = current_search_results[user_id][search_index[user_id]]
-
-            score = get_user_score(conn, user_id, target_user['id'])
-            if score is not None:
-                send_message(user_id, f"Следующий пользователь: {target_user.get('first_name', 'Имя')} {target_user.get('last_name', 'Фамилия')}, Score: {score:.2f}", keyboard=create_keyboard_next_fav_black())
-            else:
-                send_message(user_id, "Ошибка при получении оценки пользователя.")  # Сообщение об ошибке
-
-        else:
-            send_message(user_id, "Это был последний пользователь в результатах поиска.")
-            del current_search_results[user_id]
-            del search_index[user_id]
-    else:
-        send_message(user_id, "Сначала начните поиск, введя команду 'начать'.")
-
 
 def handle_favorites_command(conn, user_id):
     """Добавляет текущего пользователя в избранное."""
@@ -353,6 +230,27 @@ def add_user_db(vk_user_info):
         logging.info(f'Ошибка в добавление данных пользователя{e}')
 
 
+
+def send_carousel_to_user(user_id, users_list, vk) :
+    """Отправляет карусель с пользователями указанному user_id"""
+    try:
+        # Создаем карусель
+        carousel_template = create_carousel_from_users(users_list, vk)
+        
+        if carousel_template['elements']:
+            vk.messages.send(
+            user_id=user_id,
+            message="Подходящие анкеты:",
+            template=json.dumps(carousel_template),
+            random_id=random.randint(1, 10000)
+    )
+         
+        return True
+    except vk_api.exceptions.ApiError as e:
+        print(f"Ошибка при отправке карусели: {e}")
+        return False
+
+
 def main():
     """Основная функция бота: инициализирует БД и запускает бесконечный цикл."""
     conn = connect_db()
@@ -409,48 +307,13 @@ def main():
 
                             user_info = {"user_id": user_id, "age_from": age_from, "age_to": age_to,
                                          "sex": user_data["sex"], "city": user_data["city"]}
-                            search_users = search_vk_users(conn, user_info, user_id)
-
-                            scored_users = []
-                            for target_user in search_users:
-                                score = evaluate_user(user_id, target_user, user_info, conn)
-
-                                try:
-                                    cursor = conn.cursor()
-                                    cursor.execute(
-                                        "INSERT INTO search_results (user_id, target_user_id, score) VALUES (%s, %s, %s)",
-                                        (int(user_id), int(target_user['id']), float(score))
-                                    )
-                                    conn.commit()
-                                except Exception as e:
-                                    logging.error(f"Ошибка при записи оценки пользователя в БД: {e}")
-                                    send_message(user_id, "Ошибка при записи оценки пользователя в БД.")  # Сообщение об ошибке
-
-                                scored_users.append((target_user, score))
-
-                            scored_users.sort(key=lambda x: x[1], reverse=True)
-
-                            current_search_results[user_id] = [user for user, score in scored_users]
-                            search_index[user_id] = 0
-
-                            if current_search_results[user_id]:
-                                target_user = current_search_results[user_id][0]
-                                score = get_user_score(conn, user_id, target_user['id'])
-                                if score is not None:
-                                    send_message(user_id,
-                                                 f"Найден первый пользователь: {target_user.get('first_name', 'Имя')} {target_user.get('last_name', 'Фамилия')}, Score: {score:.2f}",
-                                                 keyboard=create_keyboard_next_fav_black())
-                                else:
-                                    send_message(user_id, "Ошибка при получении оценки пользователя.") # Сообщение об ошибке
-
-                            else:
-                                send_message(user_id, "Пользователи не найдены.")
-                            if user_id in search_index:
-                                del search_index[user_id]  #  Удаляем, если нет результатов
-                        except ValueError:
-                            send_message(user_id, "Некорректный формат возраста.")
+                            search_users = search_vk_users(user_info)
+                            
+                            send_carousel_to_user(user_id, search_users, vk)
+                            
                         except Exception as e:
-                            logging.exception("Ошибка при обработке возраста:")
+                            print(f'ошибка {e}')
+
 
                     elif message_text == 'дальше':
                         handle_next_command(conn, user_id)
@@ -471,3 +334,182 @@ def main():
 if __name__ == '__main__':
     print('Бот запущен !')
     main()
+
+
+# Возможные проблемы:
+# 1 у пользователя может быть скрыты дата рождения, или может быть видно только день и месяц, и мы не сможем его добавить в базу данных
+
+
+
+
+
+
+# def handle_next_command(conn, user_id):
+#     """Обрабатывает команду "Дальше" (показывает следующего пользователя)."""
+#     global search_index, current_search_results
+#     if user_id in current_search_results:
+#         search_index[user_id] = search_index.get(user_id, 0) + 1
+#         if search_index[user_id] < len(current_search_results[user_id]):
+#             target_user = current_search_results[user_id][search_index[user_id]]
+
+#             score = get_user_score(conn, user_id, target_user['id'])
+#             if score is not None:
+#                 send_message(user_id, f"Следующий пользователь: {target_user.get('first_name', 'Имя')} {target_user.get('last_name', 'Фамилия')}, Score: {score:.2f}", keyboard=create_keyboard_next_fav_black())
+#             else:
+#                 send_message(user_id, "Ошибка при получении оценки пользователя.")  # Сообщение об ошибке
+
+#         else:
+#             send_message(user_id, "Это был последний пользователь в результатах поиска.")
+#             del current_search_results[user_id]
+#             del search_index[user_id]
+#     else:
+#         send_message(user_id, "Сначала начните поиск, введя команду 'начать'.")
+
+
+
+
+# def evaluate_user(user_id, target_user, search_user_info, conn):
+#     """Оценивает пользователя по возрасту, интересам и общим друзьям."""
+#     try:
+#         target_age = calculate_age(target_user.get('bdate', ''))
+#         if target_age is None:
+#             return 0.0
+#         age_diff = abs(search_user_info['age_from'] - target_age) if target_age else 100
+#         age_score = 1 - (age_diff / 100)
+
+#         search_user_interests = get_user_interests(search_user_info['user_id'])
+#         target_user_interests = get_user_interests(target_user['id'])
+#         interests_similarity = calculate_interests_similarity(search_user_interests, target_user_interests)
+
+#         common_friends_count = asyncio.run(get_common_friends_count(search_user_info['user_id'], target_user['id']))
+
+#         friends_score = common_friends_count / 100 if common_friends_count <= 100 else 1
+#         final_score = (AGE_WEIGHT * age_score) + (INTERESTS_WEIGHT * interests_similarity) + (FRIENDS_WEIGHT * friends_score)
+
+#         return final_score
+#     except Exception as e:
+#         logging.error(f"Ошибка при оценке пользователя: {e}")
+#         return 0.0
+
+
+# def get_user_score(conn, user_id, target_user_id):
+#     """Получает оценку пользователя из БД."""
+#     try:
+#         cursor = conn.cursor()
+#         cursor.execute(
+#             "SELECT score FROM search_results WHERE user_id = %s AND target_user_id = %s",
+#             (user_id, target_user_id)
+#         )
+#         result = cursor.fetchone()
+#         if result:
+#             return result[0]
+#         else:
+#             return None
+#     except Exception as e:
+#         logging.error(f"Ошибка при получении оценки пользователя из БД: {e}")
+#         return None
+
+
+
+# @lru_cache(maxsize=128)
+# def get_user_interests(user_id):
+#     """Получает интересы пользователя (кешируется)."""
+#     try:
+#         user_info = get_vk_user_info(user_id, fields=['interests', 'music', 'books', 'groups'])
+#         if not user_info:
+#             return ''
+
+#         interests = user_info.get('interests', '') + ' ' + user_info.get('music', '') + ' ' + user_info.get('books', '')
+#         group_ids = user_info.get('groups', '')
+
+#         if group_ids:
+#             groups = ','.join(group_ids.split(','))
+#         else:
+#             groups = ''
+
+#         interests += groups
+
+#         return interests
+#     except Exception as e:
+#         logging.error(f"Ошибка при получении интересов пользователя: {e}")
+#         return ''
+
+
+# def calculate_interests_similarity(user1_interests, user2_interests):
+#     """Вычисляет схожесть интересов через TF-IDF и косинусное сходство."""
+#     try:
+#         if not user1_interests.strip() or not user2_interests.strip():
+#             return 0.0
+#         tfidf_vectorizer = TfidfVectorizer()
+#         tfidf_matrix = tfidf_vectorizer.fit_transform([user1_interests, user2_interests])
+#         similarity_score = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
+#         return similarity_score
+#     except Exception as e:
+#         logging.error(f"Ошибка при вычислении схожести интересов: {e}")
+#         return 0.0
+
+
+# async def fetch_friends(user_id):
+#     """Асинхронно получает список друзей пользователя."""
+#     try:
+#         response = await asyncio.to_thread(vk_user.friends.get, user_id=user_id)
+#         return response['items']
+#     except vk_api.exceptions.ApiError as e:
+#         logging.error(f"Ошибка при получении друзей пользователя {user_id}: {e}")
+#         return []
+
+
+# async def get_common_friends_count(user_id, target_user_id):
+#     """Считает количество общих друзей между двумя пользователями."""
+#     try:
+#         friends1 = await fetch_friends(user_id)
+#         friends2 = await fetch_friends(target_user_id)
+#         common_friends = set(friends1) & set(friends2)
+#         return len(common_friends)
+#     except Exception as e:
+#         logging.error(f"Ошибка при получении общих друзей: {e}")
+#         return 0
+
+
+##############################################################33
+# было в главном цикле 
+                            # scored_users = []
+                            # for target_user in search_users:
+                            #     score = evaluate_user(user_id, target_user, user_info, conn)
+
+                            #     try:
+                            #         cursor = conn.cursor()
+                            #         cursor.execute(
+                            #             "INSERT INTO search_results (user_id, target_user_id, score) VALUES (%s, %s, %s)",
+                            #             (int(user_id), int(target_user['id']), float(score))
+                            #         )
+                            #         conn.commit()
+                            #     except Exception as e:
+                            #         logging.error(f"Ошибка при записи оценки пользователя в БД: {e}")
+                            #         send_message(user_id, "Ошибка при записи оценки пользователя в БД.")  # Сообщение об ошибке
+
+                                # scored_users.append((target_user, score))
+
+                            # scored_users.sort(key=lambda x: x[1], reverse=True)
+
+                            # current_search_results[user_id] = [user for user, score in scored_users]
+                            # search_index[user_id] = 0
+
+                        #     if current_search_results[user_id]:
+                        #         target_user = current_search_results[user_id][0]
+                        #         score = get_user_score(conn, user_id, target_user['id'])
+                        #         if score is not None:
+                        #             send_message(user_id,
+                        #                          f"Найден первый пользователь: {target_user.get('first_name', 'Имя')} {target_user.get('last_name', 'Фамилия')}, Score: {score:.2f}",
+                        #                          keyboard=create_keyboard_next_fav_black())
+                        #         else:
+                        #             send_message(user_id, "Ошибка при получении оценки пользователя.") # Сообщение об ошибке
+
+                        #     else:
+                        #         send_message(user_id, "Пользователи не найдены.")
+                        #     if user_id in search_index:
+                        #         del search_index[user_id]  #  Удаляем, если нет результатов
+                        # except ValueError:
+                        #     send_message(user_id, "Некорректный формат возраста.")
+                        # except Exception as e:
+                        #     logging.exception("Ошибка при обработке возраста:")

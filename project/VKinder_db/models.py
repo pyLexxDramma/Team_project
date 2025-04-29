@@ -92,7 +92,3 @@ class Blacklist(Base):
     def __str__(self):
         return f'Blacklist {self.id}: {self.user_id}, {self.blacklist_user_id}'
 
-
-def create_tables(engine):
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)

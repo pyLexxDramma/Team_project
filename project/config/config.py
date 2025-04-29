@@ -12,7 +12,7 @@ DB_PASSWORD = os.environ.get("DB_PASSWORD", " ")  # Получение из пе
 DB_HOST = os.environ.get("DB_HOST", "localhost")
 DB_PORT = os.environ.get("DB_PORT", "5432")
 
-DSN = URL.create(
+DNS = URL.create(
     drivername="postgresql",
     username=DB_USER,
     password=DB_PASSWORD,

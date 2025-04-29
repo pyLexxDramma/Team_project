@@ -1,10 +1,18 @@
 import sqlalchemy
 from sqlalchemy.orm import sessionmaker
 import os
-from models import create_tables, Users, AccessToken, FavouriteUsers, Favourite, Photos, BlacklistUsers, Blacklist
+import sys
+from sqlalchemy import exists
+from sqlalchemy.exc import SQLAlchemyError
+from .models import *
 from dotenv import load_dotenv
 
+
 load_dotenv()
+
+def create_tables(engine):
+    # Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
 
 '''
 Функция создание таблиц
@@ -32,14 +40,15 @@ create_db()
 Открытие сессии
 '''
 def init_db():
+    
     try:
         DNS = os.getenv('DNS')
         engine = sqlalchemy.create_engine(DNS)
         Session = sessionmaker(bind=engine)
         session = Session()
         return session
-    except Exception:
-        print ('Ошибка соединения')
+    except SQLAlchemyError as e :
+        print (f'Ошибка соединения {e}')
 
 '''
 Добавление пользователя с которым общается бот в БД
@@ -52,12 +61,16 @@ city - город
 def add_user(vk_id, first_name, age, sex, city):
     try:
         with init_db() as session:
+            user_exists = session.query(exists().where(Users.id == vk_id)).scalar()
+            if user_exists:
+                return False
+            
             session.add(Users(id=vk_id, first_name=first_name, age=age, sex=sex, city=city))
             session.commit()
             session.close()
             return 'Пользователь добавлен в БД'
-    except Exception:
-        return 'Ошибка при добавлении пользователя'
+    except SQLAlchemyError as e:
+        return f'Ошибка при добавлении пользователя {e}'
 
 def add_token(token, date, vk_id):
     try:
@@ -66,8 +79,8 @@ def add_token(token, date, vk_id):
             session.commit()
             session.close()
             return 'Токен пользователь добавлен в БД'
-    except Exception:
-        return 'Ошибка при добавлении токена пользователя'
+    except SQLAlchemyError as e :
+        return f'Ошибка при добавлении токена пользователя {e}'
 
 '''
 Добавление в список избранных
@@ -88,8 +101,8 @@ def add_favourite(vk_id, first_name, last_name, user_id):
                 session.add(Favourite(user_id=user_id, favourite_user_id=vk_id))
                 session.commit()
                 session.close()
-    except Exception:
-        return ('Ошибка при добавлении в избранное')
+    except SQLAlchemyError as e :
+        return (f'Ошибка при добавлении в избранное {e}')
 
 '''
 Добавление ссылок на фото. При сохранении профиля в избранное, программа добавляет самые популярные фото к нему.
@@ -104,8 +117,8 @@ def add_photo(photo_url, favourite_user_id):
             session.commit()
             session.close()
             return ('Фото добавлено')
-    except Exception:
-        return ('Ошибка при добавлении фото')
+    except SQLAlchemyError as e:
+        return (f'Ошибка при добавлении фото SQLAlchemyError{e}')
 
 '''
 Добавление в чёрный список
@@ -126,8 +139,8 @@ def add_blacklist(vk_id, first_name, last_name, user_id):
                 session.add(Blacklist(user_id=user_id, blacklist_user_id=vk_id))
                 session.commit()
                 session.close()
-    except Exception:
-        return ('Ошибка при добавлении в чёрный список')
+    except SQLAlchemyError as e:
+        return (f'Ошибка при добавлении в чёрный список {e}')
 
 '''
 Получение токена и даты действия
@@ -140,8 +153,8 @@ def get_token(vk_id):
             date = info[0][1]
             session.close()
             return f'{token}, {date}'
-    except Exception:
-        return ('Ошибка при выводе списка избранных')
+    except SQLAlchemyError as e:
+        return (f'Ошибка при выводе токена {e}')
 
 
 '''
@@ -224,3 +237,40 @@ def delete_blacklist(vk_id, user_id):
     except Exception:
         return ('Ошибка при удалении из чёрного списка')
 
+
+
+
+
+
+
+
+################
+# from sqlalchemy import create_engine
+# from config.config import *
+# import logging
+###############
+##############################
+# def connect_db():
+#     """
+#     Подключается к базе данных PostgreSQL используя SQLAlchemy.
+#     Returns:
+#         sqlalchemy.engine.Engine: Объект движка SQLAlchemy или None в случае ошибки.
+#     """
+#     try:
+#         conn = create_engine(DNS)
+#         logging.info(f"Подключено к базе {DB_NAME} на {DB_HOST}")
+#         return conn
+#     except SQLAlchemyError as e:
+#         logging.error(f"Ошибка подключения к базе данных: {e}")
+#         return None
+# ###############################
+
+# def init_db():
+#     try:
+#         engine = sqlalchemy.create_engine(DNS)
+#         Session = sessionmaker(bind=engine)
+#         session = Session()
+#         return session
+    
+#     except SQLAlchemyError as e:
+#         print (f'Ошибка соединения{e}')
