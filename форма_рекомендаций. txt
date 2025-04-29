@@ -66,6 +66,9 @@
   'city': {'id': 1, 'title': 'Москва'},
   'crop_photo': {'crop': {'x': 0.0, 'x2': 100.0, 'y': 0.23, 'y2': 99.23},
                  'photo': {'album_id': -6,
+
+                attachments.append(f"photo{photo['owner_id']}_{photo['id']}")
+
                            'date': 1600859491,
                            'id': 457239923,
                            'orig_photo': {'height': 1302,
@@ -119,6 +122,8 @@
                            'web_view_token': '0f3f826024c6c48941'},
                  'rect': {'x': 0.0, 'x2': 100.0, 'y': 0.0, 'y2': 83.79}},
   'first_name': 'Ирина',
+
+
   'id': 188841057,
   'interests': '',
   'is_closed': False,

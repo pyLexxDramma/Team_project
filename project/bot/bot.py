@@ -1,6 +1,7 @@
 from pprint import pprint
 import random
 from sklearn.feature_extraction.text import TfidfVectorizer
+from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from sklearn.metrics.pairwise import cosine_similarity
 from vk_api.longpoll import VkLongPoll, VkEventType
 from vk_api.utils import get_random_id
@@ -23,7 +24,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Инициализация VK API
 vk_session = vk_api.VkApi(token=TOKEN_GROUP) 
 vk = vk_session.get_api()
-longpoll = VkLongPoll(vk_session, group_id=GROUP_ID)
+# longpoll = VkLongPoll(vk_session, group_id=GROUP_ID)
+longpoll = VkBotLongPoll(vk_session, group_id=GROUP_ID)
 
 # Глобальные переменные для хранения состояния
 user_states = {}            # Текущее состояние пользователей (FSM)
@@ -84,9 +86,10 @@ def get_city_id(city_name):
 def search_vk_users(user_info):
     """Ищет пользователей VK по заданным критериям."""
     try:
-        global vk_user
+        global vk_user, token
+        token = check_token(user_info['user_id'])
 
-        vk_session_user = vk_api.VkApi(token=check_token(user_info['user_id']))
+        vk_session_user = vk_api.VkApi(token=token)
         vk_user = vk_session_user.get_api()
 
         city_id = get_city_id(user_info['city'])
@@ -231,25 +234,231 @@ def add_user_db(vk_user_info):
 
 
 
-def send_carousel_to_user(user_id, users_list, vk) :
-    """Отправляет карусель с пользователями указанному user_id"""
+def send_user_profile(user_id, list_users, current_index=0):
+    """Отправляет профиль пользователя с фотографиями"""
     try:
-        # Создаем карусель
-        carousel_template = create_carousel_from_users(users_list, vk)
+        if current_index >= len(list_users):
+            send_message(user_id, "Анкеты закончились!")
+            return
         
-        if carousel_template['elements']:
-            vk.messages.send(
-            user_id=user_id,
-            message="Подходящие анкеты:",
-            template=json.dumps(carousel_template),
-            random_id=random.randint(1, 10000)
-    )
-         
-        return True
-    except vk_api.exceptions.ApiError as e:
-        print(f"Ошибка при отправке карусели: {e}")
-        return False
+        user = list_users[current_index]
+        
+        current_search_results[user_id] = list_users
+        search_index[user_id] = current_index
+        
+        message = f"Анкета {current_index + 1}/{len(list_users)}\n"
+        message += f"{user['first_name']} {user['last_name']}\n"
+        
+        if user.get('bdate'):
+            age = calculate_age(user['bdate'])
+            if age:
+                message += f"Возраст: {age} лет\n"
+                
+        if user.get('city'):
+            message += f"Город: {user['city']['title']}\n"
 
+        # Получаем фотографии
+        attachments = []
+        if user.get('crop_photo') and user['crop_photo'].get('photo'):
+            photo = user['crop_photo']['photo']
+            # Формируем attachment для фото
+            attachment_str = f"photo{photo['owner_id']}_{photo['id']}_{token}"
+            attachments.append(attachment_str)
+        
+        keyboard = {
+            "inline": True,
+            "buttons": [
+                [
+                    {
+                        "action": {
+                            "type": "text",
+                            "label": "❤️ В избранное",
+                            "payload": json.dumps({
+                                "user_id": user['id'],
+                                "action": "add_favorite",
+                                "current_index": current_index
+                            })
+                        },
+                        "color": "positive"
+                    },
+                    {
+                        "action": {
+                            "type": "text",
+                            "label": "🚫 В ЧС",
+                            "payload": json.dumps({
+                                "user_id": user['id'],
+                                "action": "add_blacklist",
+                                "current_index": current_index
+                            })
+                        },
+                        "color": "negative"
+                    }
+                ],
+                [
+                    {
+                        "action": {
+                            "type": "open_link",
+                            "label": "🔗 Профиль",
+                            "link": f"https://vk.com/id{user['id']}"
+                        }
+                    }
+                ],
+                [
+                    {
+                        "action": {
+                            "type": "text",
+                            "label": "➡️ Далее",
+                            "payload": json.dumps({
+                                "action": "next_profile",
+                                "current_index": current_index
+                            })
+                        },
+                        "color": "primary"
+                    }
+                ]
+            ]
+        }
+        
+        # Параметры для отправки
+        params = {
+            'user_id': user_id,
+            'message': message,
+            'random_id': get_random_id(),
+            'keyboard': json.dumps(keyboard)
+        }
+        
+        if attachments:
+            params['attachment'] = ",".join(attachments)
+        
+        vk.messages.send(**params)
+        
+        
+    except vk_api.exceptions.ApiError as e:
+        logging.error(f"Ошибка отправки профиля: {e}")
+
+
+# def main():
+#     """Основная функция бота: инициализирует БД и запускает бесконечный цикл."""
+#     conn = connect_db()
+#     if not conn:
+#         raise RuntimeError("Не удалось подключиться к базе данных")
+#     create_tables(conn)
+    
+#     global current_search_results, search_index
+    
+#     try:
+#         for event in longpoll.listen():
+#             if event.type == VkBotEventType.MESSAGE_NEW and event.from_user and event.message.get('text'):
+#                 user_id = event.message['from_id']
+#                 message_text = event.message['text'].lower()
+#             # if event.type == VkEventType.MESSAGE_NEW and event.to_me and event.text:
+#                 # user_id = event.user_id
+#                 # message_text = event.text.lower()
+                
+                
+#                 vk_user_info = get_vk_user_info(user_id, fields=['first_name', 'city', 'bdate', 'sex'])
+                
+#                 if vk_user_info:
+#                     add_user_db(vk_user_info)
+
+#                 if not user_states.get(user_id) and message_text != 'начать':
+#                     keyboard = create_keyboard_start()
+#                     send_message(user_id, "Добро пожаловать! Нажмите 'Начать'.", keyboard=keyboard)
+
+#                 elif message_text == 'начать':
+#                     user_states[user_id] = {"state": "waiting_for_city", "data": {}}
+#                     keyboard = create_keyboard_city()
+#                     send_message(user_id, "Выберите город:", keyboard=keyboard)
+
+#                 elif user_id in user_states:
+#                     state = user_states[user_id]["state"]
+#                     user_data = user_states[user_id]["data"]
+
+#                     if state == "waiting_for_city":
+#                         user_data["city"] = message_text
+#                         user_states[user_id]["state"] = "waiting_for_sex"
+#                         keyboard = create_keyboard_sex()
+#                         send_message(user_id, "Выберите пол:", keyboard=keyboard)
+
+#                     elif state == "waiting_for_sex":
+#                         if message_text == "женский":
+#                             user_data["sex"] = 1
+#                         elif message_text == "мужской":
+#                             user_data["sex"] = 2
+#                         else:
+#                             user_data["sex"] = 0
+#                         user_states[user_id]["state"] = "waiting_for_age"
+#                         send_message(user_id, "Введите возраст (или диапазон через тире, например 20-30):")
+
+#                     elif state == "waiting_for_age":
+#                         age_str = message_text
+#                         try:
+#                             if "-" in age_str:
+#                                 age_from, age_to = map(int, age_str.split("-"))
+#                             else:
+#                                 age_from = age_to = int(age_str)
+
+#                             user_info = {"user_id": user_id, "age_from": age_from, "age_to": age_to,
+#                                          "sex": user_data["sex"], "city": user_data["city"]}
+#                             list_users = search_vk_users(user_info)
+                            
+#                             current_search_results[user_id] = list_users
+#                             search_index[user_id] = 0
+                           
+#                             send_user_profile(user_id, list_users)
+#                         except vk_api.exceptions.ApiError as e:
+#                             print(f'ошибка  {e}')
+            
+#             # Обработка нажатий inline-кнопок
+#             elif event.type == VkBotEventType.MESSAGE_EVENT:
+#                 payload = json.loads(event.obj['payload'])
+#                 user_id = event.obj['user_id']
+                
+#                 if payload['action'] == 'add_favorite':
+#                     if user_id in current_search_results:
+#                         current_index = payload.get('current_index', 0)
+#                         target_user = current_search_results[user_id][current_index]
+#                         try:
+#                             cursor = conn.cursor()
+#                             cursor.execute(
+#                                 "INSERT INTO favorites (user_id, favorite_user_id) VALUES (%s, %s)",
+#                                 (user_id, target_user['id'])
+#                             )
+#                             conn.commit()
+#                             send_message(user_id, f"Добавлено в избранное: {target_user['first_name']} {target_user['last_name']}")
+#                         except Error as e:
+#                             logging.error(f"Ошибка при добавлении в избранное: {e}")
+#                             conn.rollback()
+                
+#                 elif payload['action'] == 'add_blacklist':
+#                     if user_id in current_search_results:
+#                         current_index = payload.get('current_index', 0)
+#                         target_user = current_search_results[user_id][current_index]
+#                         try:
+#                             cursor = conn.cursor()
+#                             cursor.execute(
+#                                 "INSERT INTO blacklist (user_id, blacklisted_user_id) VALUES (%s, %s)",
+#                                 (user_id, target_user['id'])
+#                             )
+#                             conn.commit()
+#                             send_message(user_id, f"Добавлено в ЧС: {target_user['first_name']} {target_user['last_name']}")
+#                         except Error as e:
+#                             logging.error(f"Ошибка при добавлении в ЧС: {e}")
+#                             conn.rollback()
+                
+#                 elif payload['action'] == 'next_profile':
+#                     current_index = payload.get('current_index', 0) + 1
+#                     if user_id in current_search_results and current_index < len(current_search_results[user_id]):
+#                         send_user_profile(user_id, current_search_results[user_id], current_index)
+#                     else:
+#                         send_message(user_id, "Анкеты закончились, начните поиск заново!")
+        
+        
+#     except vk_api.exceptions.ApiError as e:
+#         logging.exception("Ошибка в основном цикле:")
+#     # finally:
+#     #     if conn:
+#     #         conn.close()
 
 def main():
     """Основная функция бота: инициализирует БД и запускает бесконечный цикл."""
@@ -260,76 +469,119 @@ def main():
     global current_search_results, search_index
     try:
         for event in longpoll.listen():
-            if event.type == VkEventType.MESSAGE_NEW and event.to_me and event.text:
-                user_id = event.user_id
-                message_text = event.text.lower()
-
+            # Обработка нажатий inline-кнопок
+            if event.type == VkBotEventType.MESSAGE_EVENT:
+                try:
+                    payload = json.loads(event.obj['payload'])
+                    user_id = event.obj['user_id']
+                    
+                    if payload['action'] == 'add_favorite':
+                        if user_id in current_search_results:
+                            current_index = payload.get('current_index', 0)
+                            target_user = current_search_results[user_id][current_index]
+                            try:
+                                pass
+                            except Error as e:
+                                logging.error(f"Ошибка при добавлении в избранное: {e}")
+                                conn.rollback()
+                    
+                    elif payload['action'] == 'add_blacklist':
+                        if user_id in current_search_results:
+                            current_index = payload.get('current_index', 0)
+                            target_user = current_search_results[user_id][current_index]
+                            try:
+                                pass
+                            except Error as e:
+                                logging.error(f"Ошибка при добавлении в ЧС: {e}")
+                                conn.rollback()
+                    
+                    elif payload['action'] == 'next_profile':
+                        current_index = payload.get('current_index', 0) + 1
+                        if user_id in current_search_results and current_index < len(current_search_results[user_id]):
+                            send_user_profile(user_id, current_search_results[user_id], current_index)
+                        else:
+                            send_message(user_id, "Анкеты закончились! Начните новый поиск.")
+                
+                except Exception as e:
+                    logging.error(f"Ошибка обработки callback: {e}")
+                continue  # Пропускаем обработку как обычное сообщение
+            
+            # Обработка обычных сообщений (только если это не callback)
+            if event.type == VkBotEventType.MESSAGE_NEW and event.from_user and event.message.get('text'):
+                user_id = event.message['from_id']
+                message_text = event.message['text'].lower()
+                
+                # Проверяем, не является ли сообщение результатом нажатия кнопки
+                if message_text in ['❤️ в избранное', '🚫 в чс', '➡️ далее', '🔗 профиль']:
+                    continue
+                
+                # Получаем информацию о пользователе
                 vk_user_info = get_vk_user_info(user_id, fields=['first_name', 'city', 'bdate', 'sex'])
                 if vk_user_info:
                     add_user_db(vk_user_info)
 
-                if not user_states.get(user_id) and message_text != 'начать':
-                    keyboard = create_keyboard_start()
-                    send_message(user_id, "Добро пожаловать! Нажмите 'Начать'.", keyboard=keyboard)
+                # Обработка команд
+                if not user_states.get(user_id):
+                    if message_text == 'начать':
+                        user_states[user_id] = {"state": "waiting_for_city", "data": {}}
+                        keyboard = create_keyboard_city()
+                        send_message(user_id, "Введите название города для поиска:", keyboard=keyboard)
+                    else:
+                        keyboard = create_keyboard_start()
+                        send_message(user_id, "Добро пожаловать! Нажмите 'Начать'.", keyboard=keyboard)
+                    continue
+                
+                # Обработка состояний FSM
+                state = user_states[user_id]["state"]
+                user_data = user_states[user_id]["data"]
 
-                elif message_text == 'начать':
-                    user_states[user_id] = {"state": "waiting_for_city", "data": {}}
-                    keyboard = create_keyboard_city()
-                    send_message(user_id, "Выберите город:", keyboard=keyboard)
+                if state == "waiting_for_city":
+                    user_data["city"] = message_text
+                    user_states[user_id]["state"] = "waiting_for_sex"
+                    keyboard = create_keyboard_sex()
+                    send_message(user_id, "Выберите пол для поиска:", keyboard=keyboard)
 
-                elif user_id in user_states:
-                    state = user_states[user_id]["state"]
-                    user_data = user_states[user_id]["data"]
+                elif state == "waiting_for_sex":
+                    if message_text == "женский":
+                        user_data["sex"] = 1
+                    elif message_text == "мужской":
+                        user_data["sex"] = 2
+                    else:
+                        user_data["sex"] = 0
+                    user_states[user_id]["state"] = "waiting_for_age"
+                    send_message(user_id, "Введите возраст или диапазон (например: 25-30):")
 
-                    if state == "waiting_for_city":
-                        user_data["city"] = message_text
-                        user_states[user_id]["state"] = "waiting_for_sex"
-                        keyboard = create_keyboard_sex()
-                        send_message(user_id, "Выберите пол:", keyboard=keyboard)
-
-                    elif state == "waiting_for_sex":
-                        if message_text == "женский":
-                            user_data["sex"] = 1
-                        elif message_text == "мужской":
-                            user_data["sex"] = 2
+                elif state == "waiting_for_age":
+                    try:
+                        if "-" in message_text:
+                            age_from, age_to = map(int, message_text.split("-"))
                         else:
-                            user_data["sex"] = 0
-                        user_states[user_id]["state"] = "waiting_for_age"
-                        send_message(user_id, "Введите возраст (или диапазон через тире, например 20-30):")
+                            age_from = age_to = int(message_text)
 
-                    elif state == "waiting_for_age":
-                        age_str = message_text
-                        try:
-                            if "-" in age_str:
-                                age_from, age_to = map(int, age_str.split("-"))
-                            else:
-                                age_from = age_to = int(age_str)
-
-                            user_info = {"user_id": user_id, "age_from": age_from, "age_to": age_to,
-                                         "sex": user_data["sex"], "city": user_data["city"]}
-                            search_users = search_vk_users(user_info)
-                            
-                            send_carousel_to_user(user_id, search_users, vk)
-                            
-                        except Exception as e:
-                            print(f'ошибка {e}')
-
-
-                    elif message_text == 'дальше':
-                        handle_next_command(conn, user_id)
-                    elif message_text == 'избранное':
-                        handle_favorites_command(conn, user_id)
-                    elif message_text == 'черный список':
-                        handle_blacklist_command(conn, user_id)
-                    elif message_text == 'список избранных':
-                        handle_show_favorites_command(conn, user_id)
-
+                        user_info = {
+                            "user_id": user_id,
+                            "age_from": age_from,
+                            "age_to": age_to,
+                            "sex": user_data["sex"],
+                            "city": user_data["city"]
+                        }
+                        
+                        list_users = search_vk_users(user_info)
+                        if list_users:
+                            current_search_results[user_id] = list_users
+                            search_index[user_id] = 0
+                            send_user_profile(user_id, list_users)
+                        else:
+                            send_message(user_id, "По вашему запросу ничего не найдено. Попробуйте другие критерии.")
+                            user_states[user_id] = None  # Сбрасываем состояние
+                    except ValueError:
+                        send_message(user_id, "Пожалуйста, введите возраст числом или диапазон (например 25-30)")
+        
     except Exception as e:
         logging.exception("Ошибка в основном цикле:")
     finally:
         if conn:
             conn.close()
-
 
 if __name__ == '__main__':
     print('Бот запущен !')
@@ -337,9 +589,29 @@ if __name__ == '__main__':
 
 
 # Возможные проблемы:
-# 1 у пользователя может быть скрыты дата рождения, или может быть видно только день и месяц, и мы не сможем его добавить в базу данных
+# 1 у пользователя может быть скрыты дата рождения, или может быть видно только день и месяц, и мы не сможем его добавить в базу данных, если  мы уберем 
+# огранечение в таблице user что у нас возраст может быть нулевым значением, либо если мы не можем вычеслит возраст то можем по дефолту ставить просто ноль
 
 
+
+# def send_carousel_to_user(user_id, users_list, vk) :
+#     """Отправляет карусель с пользователями указанному user_id"""
+#     try:
+#         # Создаем карусель
+#         carousel_template = create_carousel_from_users(users_list, vk)
+        
+#         if carousel_template['elements']:
+#             vk.messages.send(
+#             user_id=user_id,
+#             message="Подходящие анкеты:",
+#             template=json.dumps(carousel_template),
+#             random_id=random.randint(1, 10000)
+#     )
+         
+#         return True
+#     except vk_api.exceptions.ApiError as e:
+#         print(f"Ошибка при отправке карусели: {e}")
+#         return False
 
 
 

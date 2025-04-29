@@ -63,7 +63,7 @@ def add_user(vk_id, first_name, age, sex, city):
         with init_db() as session:
             user_exists = session.query(exists().where(Users.id == vk_id)).scalar()
             if user_exists:
-                return False
+                return
             
             session.add(Users(id=vk_id, first_name=first_name, age=age, sex=sex, city=city))
             session.commit()
@@ -244,12 +244,11 @@ def delete_blacklist(vk_id, user_id):
 
 
 
-################
+# ###############
 # from sqlalchemy import create_engine
 # from config.config import *
 # import logging
-###############
-##############################
+# #############################
 # def connect_db():
 #     """
 #     Подключается к базе данных PostgreSQL используя SQLAlchemy.
@@ -272,5 +271,6 @@ def delete_blacklist(vk_id, user_id):
 #         session = Session()
 #         return session
     
+# ##############
 #     except SQLAlchemyError as e:
 #         print (f'Ошибка соединения{e}')
