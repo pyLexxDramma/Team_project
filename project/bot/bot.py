@@ -1177,3 +1177,95 @@ if __name__ == '__main__':
     main()
     """
 
+
+"""
+Проблема с кнопкой “далее”:
+При нажатии на кнопку “далее”, перебрасывает на выбор возраста. Это говорит о том, что состояние бота (FSM) сбрасывается или не сохраняется правильно при нажатии кнопки “далее”.
+Причины и решения:
+1.Убедиться, что в основном цикле main() есть обработка сообщения message_text == 'дальше'. Этот блок кода должен обновлять индекс текущего просматриваемого результата и отправлять следующую анкету.
+elif message_text == 'дальше':
+    handle_next_command(user_id, vk) 
+2.Создать функцию handle_next_command, которая будет выполнять следующие действия:
+
+Увеличивать индекс search_index[user_id].
+Проверять, не достигнут ли конец списка результатов.
+Отправлять следующую анкету пользователю.
+Обрабатывать случай, когда достигнут конец списка результатов (например, отправлять сообщение “Больше нет анкет” или начинать новый поиск).
+
+3.Потеря состояния:
+Убедиться, что состояние пользователя (user_states[user_id]) не сбрасывается при нажатии кнопки “далее”. Возможно, где-то в коде вы случайно удаляется или перезаписывается состояние пользователя.
+
+Решение: 
+1. Создать (или измените) функцию handle_next_command:
+def handle_next_command(user_id, vk):
+    """Отправляет следующую анкету пользователю."""
+    global current_search_results, search_index
+
+    if user_id in current_search_results:
+        results = current_search_results[user_id]
+        if results:
+            current_index = search_index.get(user_id, 0)  # Получаем текущий индекс или 0, если его нет
+            current_index += 1  # Увеличиваем индекс
+
+            if current_index < len(results):  # Если индекс не вышел за границы списка
+                search_index[user_id] = current_index  # Обновляем индекс
+
+                send_carousel_to_user(user_id, [results[current_index]], vk)  # Отправляем карусель с одной анкетой
+            else:
+                send_message(user_id, "Больше нет анкет.", keyboard=create_keyboard_start())  # Сообщаем, что анкеты закончились
+                # Дополнительно: Можно предложить начать новый поиск
+                user_states[user_id] = None  # Сбрасываем состояние
+                del current_search_results[user_id]
+                del search_index[user_id]
+        else:
+            send_message(user_id, "Нет результатов поиска.", keyboard=create_keyboard_start())  # Сообщаем, что нет результатов поиска
+    else:
+        send_message(user_id, "Сначала начните поиск, введя команду 'начать'.", keyboard=create_keyboard_start())  # Сообщаем, что нужно начать поиск
+
+2. Добавить вызов handle_next_command в main():
+        elif message_text == 'дальше':
+    handle_next_command(user_id, vk)
+
+3. Сохранить результаты поиска в current_search_results и инициализировать search_index:
+
+В коде, где вызываем send_carousel_to_user после получения результатов поиска, сохранить результаты поиска в current_search_results и инициализировать search_index:
+search_users = search_vk_users(user_info)
+current_search_results[user_id] = search_users  # Сохраняем результаты поиска
+search_index[user_id] = 0  # Инициализируем индекс
+send_carousel_to_user(user_id, [search_users[0]], vk) # Отправляем первую анкету
+
+4. Отправлять клавиатуру с кнопкой “далее” вместе с каждой анкетой:
+
+Изменить функцию send_carousel_to_user, чтобы она всегда отправляла клавиатуру с кнопкой “далее”:
+def send_carousel_to_user(user_id, users_list, vk):
+    """Отправляет карусель с пользователями указанному user_id"""
+    try:
+        # Создаем карусель
+        carousel_template = create_carousel_from_users(users_list, vk)
+
+        if carousel_template['elements']:
+            keyboard = create_keyboard_next()  # Создаем клавиатуру с кнопкой "далее"
+            vk.messages.send(
+                user_id=user_id,
+                message="Подходящие анкеты:",
+                template=json.dumps(carousel_template),
+                random_id=random.randint(1, 10000),
+                keyboard=keyboard # Отправляем клавиатуру
+            )
+        else:
+            send_message(user_id, "Нет подходящих анкет.", keyboard=create_keyboard_start())  # Отправляем сообщение, если нет анкет
+
+        return True
+    except vk_api.exceptions.ApiError as e:
+        print(f"Ошибка при отправке карусели: {e}")
+        return False
+
+5. Создать функцию create_keyboard_next() в модуле create_keyboard:
+from vk_api.keyboard import VkKeyboard, VkKeyboardButton, KeyboardButtonColor
+
+def create_keyboard_next():
+    keyboard = VkKeyboard(one_time=False) # False, чтобы клавиатура не исчезала после нажатия
+
+    keyboard.add_button(label="Дальше", color=KeyboardButtonColor.PRIMARY) # Меняем цвет
+    return keyboard.get_keyboard()
+    
