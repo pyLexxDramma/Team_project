@@ -2,10 +2,10 @@ import logging
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from urllib.parse import urlparse
-from config.config import *
+from config import *
 from datetime import datetime, timedelta, timezone
-from VKinder_db.models import*
-from VKinder_db.create_db import *
+from models import*
+from create_db import *
 from sqlalchemy.exc import SQLAlchemyError  # Import SQLAlchemyError
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -20,7 +20,7 @@ def get_vk_token(APPLICATION_ID):
         str: access_token или None в случае ошибки.
     """
     driver = webdriver.Chrome()
-    auth_url = f"https://oauth.vk.com/authorize?client_id={APPLICATION_ID}&display=page&redirect_uri=https://example.com/callback&scope=friends&response_type=token&v=5.131&state=123456"
+    auth_url = f"https://oauth.vk.com/authorize?client_id={APPLICATION_ID}&display=page&redirect_uri=https://example.com/callback&scope=friends,photos&response_type=token&v=5.131&state=123456"
     try:
         driver.get(auth_url)
         WebDriverWait(driver, 60).until(
@@ -51,6 +51,7 @@ def check_token(user_id):
             .filter_by(user_id=user_id) \
             .order_by(AccessToken.date.desc()) \
             .first()
+        # print(token_record)
 
         # 2. Если токен есть и он свежий (меньше 23 часов) - возвращаем его
         if token_record: #  Проверяем, что token_record не None

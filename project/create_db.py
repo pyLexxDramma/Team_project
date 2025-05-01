@@ -4,7 +4,7 @@ import os
 import sys
 from sqlalchemy import exists
 from sqlalchemy.exc import SQLAlchemyError
-from .models import *
+from models import *
 from dotenv import load_dotenv
 
 
@@ -170,8 +170,8 @@ def get_favourite(vk_id):
                 filter(Users.id == vk_id).all()
             session.close()
             return data
-    except Exception:
-        return ('Ошибка при выводе списка избранных')
+    except SQLAlchemyError as e :
+        return (f'Ошибка при выводе списка избранных {e}')
 
 '''
 Получение фото
@@ -184,8 +184,8 @@ def get_photo(vk_id):
                 filter(FavouriteUsers.id == vk_id).all()
             session.close()
             return photos
-    except Exception:
-        return ('Ошибка при получении фото избранных')
+    except SQLAlchemyError as e :
+        return (f'Ошибка при получении фото избранных {e}')
 
 '''
 Получение чёрного списка
@@ -200,8 +200,8 @@ def get_blacklist(vk_id):
                 filter(Users.id == vk_id).all()
             session.close()
             return blacklist
-    except Exception:
-        return ('Ошибка при выводе чёрного списка')
+    except SQLAlchemyError as e:
+        return (f'Ошибка при выводе чёрного списка {e}')
 
 '''
 Удаление профиля из списка избранных
@@ -217,8 +217,8 @@ def delete_favourite(vk_id, user_id):
             session.commit()
             session.close()
             return 'Профиль удалён из списка избранного'
-    except Exception:
-        return ('Ошибка при удалении из списка избранного')
+    except SQLAlchemyError as e :
+        return (f'Ошибка при удалении из списка избранного {e}')
 
 '''
 Удаление профиля из чёрного списка
@@ -233,9 +233,9 @@ def delete_blacklist(vk_id, user_id):
             session.delete(blacklist)
             session.commit()
             session.close()
-            return 'Профиль удалён из чёрного списка'
-    except Exception:
-        return ('Ошибка при удалении из чёрного списка')
+            return 'Успешно: пользователь удалён из чёрного списка'
+    except SQLAlchemyError as e :
+        return (f'Ошибка при удалении из чёрного списка {e}')
 
 
 
@@ -246,7 +246,7 @@ def delete_blacklist(vk_id, user_id):
 
 # ###############
 # from sqlalchemy import create_engine
-# from config.config import *
+# from config import *
 # import logging
 # #############################
 # def connect_db():

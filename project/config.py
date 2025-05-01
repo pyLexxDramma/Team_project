@@ -1,6 +1,7 @@
 from sqlalchemy.engine.url import URL
 import os
 
+
 TOKEN_GROUP = os.environ.get("TOKEN_GROUP", "YOUR_TOKEN_HERE")  # Получение из переменной окружения
 
 GROUP_ID = 2  # id сообщества
