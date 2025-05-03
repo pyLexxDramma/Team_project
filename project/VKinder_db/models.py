@@ -62,7 +62,7 @@ class Photos(Base):
     photo_url = sq.Column(sq.String, unique=True, nullable=False)
     favourite_user_id = sq.Column(sq.Integer, sq.ForeignKey('favourite_users.id'), nullable=False)
 
-    favourite_users = relationship(FavouriteUsers, backref='fav_us_id', cascade='all, delete')
+    favourite_users = relationship(FavouriteUsers, backref='fav_us_id')
 
     def __str__(self):
         return f'Photos {self.id}: {self.photo_url}, {self.favourite_user_id}'

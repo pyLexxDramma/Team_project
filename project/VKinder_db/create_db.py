@@ -5,7 +5,6 @@ from sqlalchemy import exists
 from sqlalchemy.exc import SQLAlchemyError
 from models import *
 from dotenv import load_dotenv
-from bot import *
 
 
 load_dotenv()
@@ -124,7 +123,7 @@ def add_photo(photo_url, favourite_user_id):
             session.close()
             return ('Фото добавлено')
     except SQLAlchemyError as e:
-        return (f'Ошибка при добавлении фото SQLAlchemyError{e}')
+        return (f'Ошибка при добавлении фото {e}')
 
 '''
 Добавление в чёрный список
@@ -218,9 +217,18 @@ user_id - - vk_id пользователя с которым общается б
 def delete_favourite(vk_id, user_id):
     try:
         with init_db() as session:
-            favorite = session.query(Favourite).\
-                filter(Favourite.user_id == user_id, Favourite.favourite_user_id == vk_id).one()
-            session.delete(favorite)
+            favourite = session.query(Favourite).\
+                filter(Favourite.user_id == user_id, Favourite.favourite_user_id == vk_id).first()
+            if not favourite:
+                return 'Пользователь не найден в списке избранных'
+            session.delete(favourite)
+
+            other_favourites = session.query(Favourite). \
+                filter(Favourite.favourite_user_id == vk_id).count()
+            if other_favourites == 0:
+                session.query(Photos).filter(Photos.favourite_user_id == vk_id).delete()
+                session.query(FavouriteUsers).filter(FavouriteUsers.id == vk_id).delete()
+
             session.commit()
             session.close()
             return 'Профиль удалён из списка избранного'
@@ -236,10 +244,17 @@ def delete_blacklist(vk_id, user_id):
     try:
         with init_db() as session:
             blacklist = session.query(Blacklist).\
-                filter(Blacklist.user_id == user_id, Blacklist.blacklist_user_id == vk_id).one()
+                filter(Blacklist.user_id == user_id, Blacklist.blacklist_user_id == vk_id).first()
+            if not blacklist:
+                return 'Пользователь не найден в чёрном списке'
             session.delete(blacklist)
+
+            other_blacklists = session.query(Blacklist).filter(Blacklist.blacklist_user_id == vk_id).count()
+            if other_blacklists == 0:
+                session.query(BlacklistUsers).filter(BlacklistUsers.id == vk_id).delete()
+
             session.commit()
             session.close()
-            return 'Успешно: пользователь удалён из чёрного списка'
+            return 'Профиль удалён из чёрного списка'
     except SQLAlchemyError as e :
         return (f'Ошибка при удалении из чёрного списка {e}')

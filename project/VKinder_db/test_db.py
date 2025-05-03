@@ -7,7 +7,7 @@ def generate_add_user():
     yield 547465, 'Фёдор', '30', 'мужской', 'Санкт-Петербург', 'Пользователь добавлен в БД'
     yield 547724, 'Иван', '35', 'мужской', 'Выборг', 'Пользователь добавлен в БД'
     yield 745455,'Фрося', '28', 'женский', 'Петрозаводск', 'Пользователь добавлен в БД'
-    yield 547724, 'Иван', '35', 'мужской', 'Выборг', 'Ошибка при добавлении пользователя'
+    yield 547724, 'Иван', '35', 'мужской', 'Выборг', 'Пользователь есть в БД'
 
 @pytest.mark.parametrize('a,b,c,d,e,expected', generate_add_user())
 def test_add_user(a, b, c, d, e, expected):
@@ -24,9 +24,10 @@ def test_add_token(a, b, c, expected):
 
 def generate_add_favourite():
     yield 845456, 'Катя', 'Катина', 547465, None          # Добавится в таблицу
-    yield 959555, 'Дима', 'Димин', 547465, None           # Добавится в таблицу
+    yield 959555, 'Вася', 'Пупкин', 547465, None           # Добавится в таблицу
     yield 845456, 'Катя', 'Катина', 547724, None          # Добавится в таблицу
     yield 845456, 'Катя', 'Катина', 547465, None          # Не добавится в таблицу
+    yield 959555, 'Вася', 'Пупкин', 745455, None          # Добавится в таблицу
 
 @pytest.mark.parametrize('a, b, c, d, expected', generate_add_favourite())
 def test_add_favourite(a, b, c, d, expected):
@@ -68,7 +69,7 @@ def test_get_token(a, expected):
 
 
 def generate_get_favourite():
-    yield 547465, [('Катя', 'Катина', 845456), ('Дима', 'Димин', 959555)]
+    yield 547465, [('Катя', 'Катина', 845456), ('Вася', 'Пупкин', 959555)]
     yield 547724, [('Катя', 'Катина', 845456)]
 
 @pytest.mark.parametrize('a, expected', generate_get_favourite())
