@@ -1,7 +1,6 @@
 import sqlalchemy
 from sqlalchemy.orm import sessionmaker
 import os
-import sys
 from sqlalchemy import exists
 from sqlalchemy.exc import SQLAlchemyError
 from models import *
@@ -12,7 +11,7 @@ from bot import *
 load_dotenv()
 
 def create_tables(engine):
-    # Base.metadata.drop_all(engine)
+    Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
 
 '''
@@ -73,6 +72,12 @@ def add_user(vk_id, first_name, age, sex, city):
     except SQLAlchemyError as e:
         return f'Ошибка при добавлении пользователя {e}'
 
+'''
+Добавление токена в БД
+token - токен пользователя
+date - дата действия
+vk_id - vk_id пользователя
+'''
 def add_token(token, date, vk_id):
     try:
         with init_db() as session:
@@ -145,6 +150,7 @@ def add_blacklist(vk_id, first_name, last_name, user_id):
 
 '''
 Получение токена и даты действия
+vk_id - vk_id пользователя
 '''
 def get_token(vk_id):
     try:
@@ -202,8 +208,8 @@ def get_blacklist(vk_id):
             session.close()
             return blacklist
     except SQLAlchemyError as e:
-        logging.error(f"Ошибка при проверке чёрного списка: {e}")
-        return None
+        return (f"Ошибка при получении чёрного списка: {e}")
+
 '''
 Удаление профиля из списка избранных
 vk_id - vk_id профиля в избранном
@@ -237,54 +243,3 @@ def delete_blacklist(vk_id, user_id):
             return 'Успешно: пользователь удалён из чёрного списка'
     except SQLAlchemyError as e :
         return (f'Ошибка при удалении из чёрного списка {e}')
-
-
-def checking_the_blacklist(user_id, target_user_id):
-    """Проверяет, кто у нашего пользователя в черном списке"""
-    try:
-        with init_db() as session:
-            blacklist = session.query(BlacklistUsers).\
-                join(Blacklist, Blacklist.blacklist_user_id == BlacklistUsers.id).\
-                filter(
-                    Blacklist.user_id == user_id,  # ЧС принадлежит текущему пользователю
-                    BlacklistUsers.id == target_user_id    # Искомый пользователь в ЧС
-                ).\
-                first()  # Берём только первую запись (если есть)
-            return blacklist is not None  # True если есть в ЧС, False если нет
-    except SQLAlchemyError as e:
-        logging.error(f"Ошибка при проверке чёрного списка: {e}")
-        return False  # В случае ошибки считаем, что пользователя нет в ЧС
-
-
-
-
-
-
-# ###############
-# from sqlalchemy import create_engine
-# from config import *
-# import logging
-# #############################
-# def connect_db():
-#     """
-#     Подключается к базе данных PostgreSQL используя SQLAlchemy.
-#     Returns:
-#         sqlalchemy.engine.Engine: Объект движка SQLAlchemy или None в случае ошибки.
-#     """
-#     try:
-#         conn = create_engine(DNS)
-#         logging.info(f"Подключено к базе {DB_NAME} на {DB_HOST}")
-#         return conn
-#     except SQLAlchemyError as e:
-#         logging.error(f"Ошибка подключения к базе данных: {e}")
-#         return None
-# ###############################
-
-# def init_db():
-#     try:
-#         engine = sqlalchemy.create_engine(DNS)
-#         Session = sessionmaker(bind=engine)
-#         session = Session()
-#         return session
-#     except SQLAlchemyError as e:
-#         print (f'Ошибка соединения{e}')
