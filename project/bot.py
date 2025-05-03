@@ -1,5 +1,5 @@
-from create_keyboard import *
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
+from create_keyboard import *
 from vk_api.utils import get_random_id
 from pprint import pprint
 from create_db import *
@@ -22,14 +22,10 @@ longpoll = VkBotLongPoll(vk_session, group_id=GROUP_ID)
 user_states = {}            # Текущее состояние пользователей (FSM)
 current_search_results = {} # Результаты поиска для каждого пользователя
 search_index = {}           # Индекс текущего просматриваемого результата
+search_offsets = {}
 
 def send_message(user_id, message, keyboard=None):
-    """Отправляет сообщение пользователю в VK
-    
-    :param user_id: ID пользователя
-    :param message: Текст сообщения
-    :param keyboard: Клавиатура (None - без клавиатуры)
-    """
+    """Отправляет сообщение пользователю в VK"""
     params = {
         'user_id': user_id,
         'message': message,
@@ -77,12 +73,13 @@ def get_city_id(city_name):
         if response['items']:
             return response['items'][0]['id']
         return None
+    
     except vk_api.exceptions.ApiError as e:
         logging.error(f"Ошибка при получении ID города: {e}")
         return None
 
 
-def search_vk_users(user_id, user_info):
+def search_vk_users(user_id, user_info, offset=0):
     """Ищет пользователей VK по заданным критериям."""
     try:
         global vk_user, token
@@ -99,19 +96,22 @@ def search_vk_users(user_id, user_info):
             'age_to': user_info['age_to'],
             'sex': user_info['sex'],
             'count': 10,
+            'offset': offset,
             'fields': 'city, sex, bdate, interests, music, books, groups, crop_photo',
             'status': 6  # В активном поиске
         }
         response = vk_user.users.search(**params)
         users = response['items']
-        logging.info(f"Найдено пользователей: {len(users)}")
-        send_message(user_id, f"Найдено пользователей: {len(users)}, подождите пару секунд, анкеты формируются!")
+        send_message(user_id, f"Люди нашлись, подождите пару секунд, анкеты формируются!")
 
         filtered_users = []
+        
         for user_data in users:
-            if get_blacklist(user_data['id']):
-                continue
-
+            target_user_id = user_data['id']
+            
+            if checking_the_blacklist(user_id, target_user_id):
+                continue    
+            
             age = calculate_age(user_data.get('bdate', ''))
             
             if age is None:
@@ -119,7 +119,9 @@ def search_vk_users(user_id, user_info):
                 continue
 
             filtered_users.append(user_data)
-        return filtered_users
+                 
+        new_offset = offset + len(filtered_users)
+        return filtered_users, new_offset
     except vk_api.exceptions.ApiError as e:
         logging.error(f"Ошибка при поиске пользователей: {e}")
         return []
@@ -129,9 +131,7 @@ def add_user_db(vk_user_info):
     """Обрабатывает и сохраняет данные пользователя VK в базу данных."""
     try:
         vk_id = int(vk_user_info['id'])
-        first_name = str(vk_user_info.get('first_name', ''))[:20]
-        if not first_name:
-            first_name = 'Неизвестно'
+        first_name = str(vk_user_info.get('first_name', 'Неизвестно'))[:20]
 
         city = 'Не указан'
         if 'city' in vk_user_info:
@@ -151,14 +151,8 @@ def add_user_db(vk_user_info):
             else:
                 logging.info(f"Пользователь {vk_id}: указана неполная дата рождения")
 
-        sex = str(vk_user_info.get('sex', 0))
-        if sex == '1':
-            sex = 'женщина'
-        elif sex == '2':
-            sex = 'мужчина'
-        else:
-            sex = 'не известный'
-        sex = sex[:10]
+        sex_map = {'1': 'женщина', '2': 'мужчина'}
+        sex = sex_map.get(str(vk_user_info.get('sex', 0)), 'не известный')[:10]
 
         result = add_user(
             vk_id=vk_id,
@@ -189,25 +183,31 @@ def photo_search(id_recommendations, count=100):
     
     
 def photo_filtering(user_id, id_recommendations, count=3):
-    
-    all_photo = photo_search(id_recommendations)
-    if not all_photo:
-        send_message(user_id, f'У пользователя нет фото')
-    
-    sorted_photos = sorted(
-        all_photo,
-        key=lambda x: x['likes']['count'],
-        reverse=True)
-    
-    top_photos = []
-    for photo in sorted_photos[:count]:
-        top_photos.append({
-            'owner_id': photo['owner_id'],
-            'id': photo['id'],
-        })
+    try: 
+        all_photo = photo_search(id_recommendations)
+        if not all_photo:
+            send_message(user_id, f'У пользователя нет фото')
+            return
+            
+        elif all_photo:
+            sorted_photos = sorted(
+                all_photo,
+                key=lambda x: x['likes']['count'],
+                reverse=True)
+        
+        top_photos = []
+        for photo in sorted_photos[:count]:
+            top_photos.append({
+                'owner_id': photo['owner_id'],
+                'id': photo['id'],
+            })
 
-    return top_photos
-    
+        return top_photos
+    except vk_api.exceptions.ApiError as e:
+        logging.error(f"Ошибка при получении фото {id_recommendations}: {e}")
+        send_message(user_id, 'Ошибка при получение фото')
+        
+        
 
 def send_user_profile(user_id, list_users, current_index=0):
     """Отправляет профиль пользователя с фотографиями"""
@@ -228,14 +228,15 @@ def send_user_profile(user_id, list_users, current_index=0):
             age = calculate_age(user['bdate'])
             if age:
                 message += f"Возраст: {age} лет\n"
-                
-        if user.get('city'):
-            message += f"Город: {user['city']['title']}\n"
-
+            else:
+                logging.error(f"Ошибка при обработке возраста: {e}")
+            
+        city = user.get('city', {}).get('title', 'не указан')
+        message += f"Город: {city}\n"
+        
         id_recommendations = user.get('id') 
 
         result = photo_filtering(user_id, id_recommendations)
-        
         # Получаем фотографии
         attachments = []
         if result:
@@ -271,7 +272,7 @@ def send_user_profile(user_id, list_users, current_index=0):
         vk.messages.send(**params)
         
     except vk_api.exceptions.ApiError as e:
-        logging.error(f"Ошибка при отправке профиля: {e}")
+        logging.error(f"Ошибка при отправке анкеты: {e}")
         send_message(user_id, "Произошла ошибка при загрузке анкеты.")
 
 
@@ -280,21 +281,30 @@ def show_favorites_simple(user_id):
     try:
         favorites = get_favourite(user_id)
         
-        if isinstance(favorites, str) and favorites.startswith('Ошибка'):
-            send_message(user_id, favorites)
-            return
-        
         if not favorites:
             send_message(user_id, "Ваш список избранных пока пуст.")
             return
+        send_message(user_id, f'⭐ В вашем списке избранных {len(favorites)} людей')
+        for first_name, last_name, fav_id in favorites:
+            # Формируем сообщение
+            message = f"⭐ {first_name} {last_name}\n"
+            message += f"👉 vk.com/id{fav_id}\n"
+            photos = get_photo(fav_id)
+            attachments = [photo[0] for photo in photos] if photos else []
         
-        message = "⭐ Ваши избранные:\n\n"
-        for i, (first_name, last_name, fav_id) in enumerate(favorites, 1):
-            message += f"{i}. {first_name} {last_name}\n"
-            message += f"   👉 vk.com/id{fav_id}\n\n"
-        
-        send_message(user_id, message.strip())
-        
+            keyboard = keyboard_favorites_list(user_id, fav_id)
+            params = {
+                    'user_id': user_id,
+                    'message': message,
+                    'random_id': get_random_id(),
+                    'keyboard': json.dumps(keyboard)
+                }
+                
+            if attachments:
+                params['attachment'] = ",".join(attachments)
+            
+            vk.messages.send(**params)
+            
     except vk_api.exceptions.ApiError as e:
         logging.error(f"Ошибка при выводе избранных: {e}")
         send_message(user_id, "Произошла ошибка при загрузке списка избранных.")
@@ -309,10 +319,11 @@ def show_blacklist(user_id):
             send_message(user_id, blacklist)
             
         if not blacklist:
-            send_message(user_id, "Ваш черный список пуст.")
+            send_message(user_id, "Ваш черный список пуст 📖")
+            return
             
         # Формируем сообщение
-        send_message(user_id, "🚫 Ваш черный список:")
+        send_message(user_id, f"🚫 В вашем черном списоке: {len(blacklist)} людей")
 
         for i, (first_name, last_name, bl_id) in enumerate(blacklist, 1):
             # Формируем сообщение для одной анкеты
@@ -333,14 +344,13 @@ def show_blacklist(user_id):
 
 
 
-
 def main():
     """Основная функция бота: инициализирует БД и запускает бесконечный цикл."""
     conn = connect_db()
     if not conn:
         raise RuntimeError("Не удалось подключиться к базе данных")
     create_tables(conn)
-    
+
     try:
         for event in longpoll.listen():
             # Обработка нажатий inline-кнопок
@@ -364,9 +374,18 @@ def main():
                                 vk_id = target_user['id']
                                 first_name = target_user['first_name']
                                 last_name = target_user.get('last_name', '')
+                                
                                 add_favourite(vk_id, first_name, last_name, user_id)
+                                
+                                photos = photo_filtering(user_id, vk_id)
+                                if photos:
+                                    for photo in photos:
+                                        photo_str = f"photo{photo['owner_id']}_{photo['id']}_{token}"
+                                        add_photo_result = add_photo(photo_str, vk_id)
+                                        if 'Ошибка' in add_photo_result:
+                                            logging.error(f"Ошибка при сохранении фото: {add_photo_result}")
+                                    
                                 send_message(user_id, f"❤️ {first_name} {last_name} добавлен(а) в избранное!")
-                            
                             except vk_api.exceptions.ApiError as e:
                                 logging.error(f"Ошибка при добавлении в избранное: {e}")
                                 conn.rollback()
@@ -407,6 +426,7 @@ def main():
                                 send_user_profile(user_id, current_search_results[user_id], current_index)
                             else:
                                 # Анкеты закончились
+                                search_offsets[user_id] = search_offsets.get(user_id, 0) + 10
                                 send_message(user_id, "Анкеты закончились! Напишите 'Начать' для нового поиска.")
                                 # Очищаем результаты поиска
                                 del current_search_results[user_id]
@@ -448,6 +468,20 @@ def main():
                             logging.error(f"Ошибка удаления из ЧС: {e}")
                             send_message(user_id, "Произошла ошибка при удалении из чёрного списка")
                         
+                    # удалить из избранного списка
+                    elif payload.get('action') == 'remove_from_favorites':
+                        try :
+                            vk_id = payload['user_id']  # ID пользователя, которого нужно удалить из ЧС
+                            user_id = event.obj['user_id']  # ID пользователя, который нажал кнопку
+                            
+                            delete_favourite(vk_id, user_id)        
+                                          
+                            send_message(user_id, "✅ Пользователь удалён из избранного")
+                        except vk_api.exceptions.ApiError as e:
+                            logging.error(f"Ошибка удаления из избранного: {e}")
+                            send_message(user_id, "Произошла ошибка при удалении из избранного списка")
+                            
+                            
 
                 except vk_api.exceptions.ApiError as e:
                     logging.error(f"Ошибка обработки: {e}")
@@ -467,7 +501,7 @@ def main():
                 # Обработка команд
                 if not user_states.get(user_id):
                     if message_text == 'начать':
-                        user_states[user_id] = {"state": "waiting_for_city", "data": {}}
+                        user_states[user_id] = {"state": "waiting_for_city", "data": {}, "offset": 0}
                         keyboard = create_keyboard_city()
                         send_message(user_id, "Введите название города для поиска:", keyboard=keyboard)
                     else:
@@ -511,8 +545,11 @@ def main():
                             "sex": user_data["sex"],
                             "city": user_data["city"]
                         }
+                        current_offset = search_offsets.get(user_id, 0)
                         
-                        list_users = search_vk_users(user_id, user_info)
+                        list_users, new_offset  = search_vk_users(user_id, user_info, offset=current_offset)
+                        search_offsets[user_id] = new_offset
+                        
                         if list_users:
                             current_search_results[user_id] = list_users
                             search_index[user_id] = 0
@@ -529,21 +566,24 @@ def main():
 
             
 if __name__ == '__main__':
-    print('Бот запущен !')
-    main()
+    try:
+        print('Бот запущен !')
+        main()
+    except Exception as e :
+        logging.exception(f"Ошибка в main: {e}")
+        
 
 
 # Возможные проблемы:
-# 1 у пользователя может быть скрыты дата рождения, или может быть видно только день и месяц, и мы не сможем его добавить в базу данных, если  мы уберем 
-# огранечение в таблице user что у нас возраст может быть нулевым значением, либо если мы не можем вычеслит возраст то можем по дефолту ставить просто ноль
+
+# 1 доработать когда пользователь хочет вести другой город 
 
 
-# 2 доработать когда пользователь хочет вввести другой город 
+# 2 при выводе списка избранных если мы хотим человека от туда добавить в чс, то мы должны сделать так что бы он удалился сначала из таблицы избранных и перешел в таблицу чс,
+# что бы не было задваения, тоесть он в избранном и в ЧС одновременно 
 
-# 3 при выводе людей не срабатывает обработка если мы человека уже добавли в чс 
 
-# 4 если ЧС пуста то надо написать что список пуст 
+# 3 сделать проверку что токен валидный 
 
-# 5 реализовать вывод избранный по одному, и добавить какие то кнопки для взаимодейстяви,
-# предлогаю кнопку удалть из избранного, и добавить в ЧС(при добавление в чс удаляется из избранного 
-# избежать то го что человек в избранном и чс)
+# 4  при удаление челоека из таблицы Favourite, доработать таблицу так что бы каскадом удалялись записи в таблице Photos и FavouriteUsers
+# 5  при удаление челоевка из ЧС мы удаляем его из Blacklist, доработать таблицу так что бы каскадом удалась запись из BlacklistUsers

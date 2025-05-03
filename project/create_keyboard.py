@@ -145,3 +145,45 @@ def questionnaire_keyboard(user, current_index ):
             ]
         }
     return profile_keyboard
+
+def keyboard_favorites_list(user_id, fav_id):
+    """Клавиатура для избранного списка (исправленная)"""
+    keyboard = {
+        "inline": True,
+        "buttons": [
+            [  # Первый ряд - 2 кнопки действий
+                {
+                    "action": {
+                        "type": "callback",
+                        "label": "❌ Удалить",
+                        "payload": {
+                            "action": "remove_from_favorites",
+                            "user_id": user_id
+                        }
+                    },
+                    "color": "negative"
+                },
+                {
+                    "action": {
+                        "type": "callback",
+                        "label": "🚫 В ЧС",
+                        "payload": {
+                            "action": "add_blacklist",
+                            "user_id": user_id
+                        }
+                    },
+                    "color": "primary"
+                }
+            ],
+            [  # Второй ряд - 1 кнопка с ссылкой
+                {
+                    "action": {
+                        "type": "open_link",
+                        "label": "✉️ Написать сообщение",
+                        "link": f"https://vk.com/im?sel={fav_id}"
+                    }
+                }
+            ]
+        ]
+    }
+    return keyboard
