@@ -2,10 +2,10 @@ from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from create_keyboard import *
 from vk_api.utils import get_random_id
 from pprint import pprint
-from create_db import *
 from BD_tokens import *
 from config import *
-from models import* 
+from VKinder_db.create_db import *
+from VKinder_db.models import *
 import datetime
 import logging
 import vk_api
@@ -22,7 +22,7 @@ longpoll = VkBotLongPoll(vk_session, group_id=GROUP_ID)
 user_states = {}            # Текущее состояние пользователей (FSM)
 current_search_results = {} # Результаты поиска для каждого пользователя
 search_index = {}           # Индекс текущего просматриваемого результата
-search_offsets = {}
+search_offsets = {}         # Индекс смещения
 
 def send_message(user_id, message, keyboard=None):
     """Отправляет сообщение пользователю в VK"""
@@ -38,8 +38,7 @@ def send_message(user_id, message, keyboard=None):
     vk.messages.send(**params)
 
 
-
-def get_vk_user_info(user_id, fields=None):
+def get_vk_user_info(user_id:int, fields=None):
     """Получает информацию о пользователе VK."""
     try:
         user_info = vk.users.get(user_ids=user_id, fields=fields)
@@ -51,9 +50,9 @@ def get_vk_user_info(user_id, fields=None):
     except vk_api.exceptions.ApiError as e:
         logging.error(f"Ошибка при получении информации о пользователе: {e}")
         return None
+    
 
-
-def calculate_age(birthdate_str):
+def calculate_age(birthdate_str:str):
     """Вычисляет возраст по дате рождения."""
     try:
         birthdate = datetime.datetime.strptime(birthdate_str, '%d.%m.%Y')
@@ -109,8 +108,10 @@ def search_vk_users(user_id, user_info, offset=0):
         for user_data in users:
             target_user_id = user_data['id']
             
-            if checking_the_blacklist(user_id, target_user_id):
-                continue    
+            blacklisted_ids = [user[2] for user in get_blacklist(user_id) if not isinstance(user, str)]
+
+            if target_user_id in blacklisted_ids:
+                continue
             
             age = calculate_age(user_data.get('bdate', ''))
             
@@ -167,6 +168,7 @@ def add_user_db(vk_user_info):
 
 
 def photo_search(id_recommendations, count=100):
+    '''Получени фото от рекомендаций'''
     try:
         photos = vk_user.photos.get(
                 owner_id=id_recommendations,
@@ -183,6 +185,7 @@ def photo_search(id_recommendations, count=100):
     
     
 def photo_filtering(user_id, id_recommendations, count=3):
+    '''Фильтрация фото, берем топ-3 залайканых'''
     try: 
         all_photo = photo_search(id_recommendations)
         if not all_photo:
@@ -244,7 +247,6 @@ def send_user_profile(user_id, list_users, current_index=0):
                 photo_str = f"photo{photo['owner_id']}_{photo['id']}_{token}"
                 attachments.append(photo_str)
         
-        
         profile_keyboard = questionnaire_keyboard(user, current_index)
         # Клавиатура управления избранными
         favorites_keyboard = json.loads(create_favorites_keyboard())
@@ -282,7 +284,7 @@ def show_favorites_simple(user_id):
         favorites = get_favourite(user_id)
         
         if not favorites:
-            send_message(user_id, "Ваш список избранных пока пуст.")
+            send_message(user_id, "Ваш список избранных пока пуст 📖")
             return
         send_message(user_id, f'⭐ В вашем списке избранных {len(favorites)} людей')
         for first_name, last_name, fav_id in favorites:
@@ -308,6 +310,7 @@ def show_favorites_simple(user_id):
     except vk_api.exceptions.ApiError as e:
         logging.error(f"Ошибка при выводе избранных: {e}")
         send_message(user_id, "Произошла ошибка при загрузке списка избранных.")
+
 
 def show_blacklist(user_id):
     '''Выводит черный список '''
@@ -342,11 +345,9 @@ def show_blacklist(user_id):
 
 
 
-
-
 def main():
     """Основная функция бота: инициализирует БД и запускает бесконечный цикл."""
-    conn = connect_db()
+    conn = create_db()
     if not conn:
         raise RuntimeError("Не удалось подключиться к базе данных")
     create_tables(conn)
@@ -363,6 +364,11 @@ def main():
                         raise ValueError("Некорректный формат payload")
                         
                     user_id = event.obj['user_id']
+                    # снимате значек загрузки с кнопок при нажатие
+                    vk.messages.sendMessageEventAnswer(
+                    event_id=event.obj['event_id'],
+                    user_id=user_id,
+                    peer_id=event.obj['peer_id'])
                     
                     # Обработка добавления в избранное
                     if payload.get('action') == 'add_favorite':
@@ -474,15 +480,18 @@ def main():
                             vk_id = payload['user_id']  # ID пользователя, которого нужно удалить из ЧС
                             user_id = event.obj['user_id']  # ID пользователя, который нажал кнопку
                             
-                            delete_favourite(vk_id, user_id)        
+                            result = delete_favourite(vk_id, user_id) 
+                            
+                            if result.startswith('Успешно'):
+                                send_message(user_id, result)
+                            else:
+                                send_message(user_id, f"Ошибка: {result}")       
                                           
-                            send_message(user_id, "✅ Пользователь удалён из избранного")
                         except vk_api.exceptions.ApiError as e:
                             logging.error(f"Ошибка удаления из избранного: {e}")
                             send_message(user_id, "Произошла ошибка при удалении из избранного списка")
                             
                             
-
                 except vk_api.exceptions.ApiError as e:
                     logging.error(f"Ошибка обработки: {e}")
                     send_message(user_id, "⚠️ Произошла ошибка. Попробуйте ещё раз.")
@@ -503,7 +512,7 @@ def main():
                     if message_text == 'начать':
                         user_states[user_id] = {"state": "waiting_for_city", "data": {}, "offset": 0}
                         keyboard = create_keyboard_city()
-                        send_message(user_id, "Введите название города для поиска:", keyboard=keyboard)
+                        send_message(user_id, "Выберите название города для поиска или нажмите 'Другой' для ввода конкретного города", keyboard=keyboard)
                     else:
                         keyboard = create_keyboard_start()
                         send_message(user_id, "Добро пожаловать! Нажмите 'Начать'.", keyboard=keyboard)
@@ -514,10 +523,23 @@ def main():
                 user_data = user_states[user_id]["data"]
 
                 if state == "waiting_for_city":
-                    user_data["city"] = message_text
-                    user_states[user_id]["state"] = "waiting_for_sex"
-                    keyboard = create_keyboard_sex()
-                    send_message(user_id, "Выберите пол для поиска:", keyboard=keyboard)
+                    if message_text == 'другой':
+                        user_states[user_id]["state"] = "waiting_for_custom_city"
+                        send_message(user_id, "Введите название вашего города:")
+                    else:    
+                        user_data["city"] = message_text
+                        user_states[user_id]["state"] = "waiting_for_sex"
+                        keyboard = create_keyboard_sex()
+                        send_message(user_id, "Выберите пол для поиска:", keyboard=keyboard)
+
+                elif state == "waiting_for_custom_city":
+                    if len(message_text) > 2:  # Минимальная длина названия города
+                        user_data["city"] = message_text
+                        user_states[user_id]["state"] = "waiting_for_sex"
+                        keyboard = create_keyboard_sex()
+                        send_message(user_id, "Выберите пол для поиска:", keyboard=keyboard)
+                    else:
+                        send_message(user_id, "Название города слишком короткое. Попробуйте еще раз.")
 
                 elif state == "waiting_for_sex":
                     if message_text == "женский":
@@ -576,14 +598,8 @@ if __name__ == '__main__':
 
 # Возможные проблемы:
 
-# 1 доработать когда пользователь хочет вести другой город 
 
-
-# 2 при выводе списка избранных если мы хотим человека от туда добавить в чс, то мы должны сделать так что бы он удалился сначала из таблицы избранных и перешел в таблицу чс,
+# 1 при выводе списка избранных если мы хотим человека от туда добавить в чс, то мы должны сделать так что бы он удалился сначала из таблицы избранных и перешел в таблицу чс,
 # что бы не было задваения, тоесть он в избранном и в ЧС одновременно 
 
 
-# 3 сделать проверку что токен валидный 
-
-# 4  при удаление челоека из таблицы Favourite, доработать таблицу так что бы каскадом удалялись записи в таблице Photos и FavouriteUsers
-# 5  при удаление челоевка из ЧС мы удаляем его из Blacklist, доработать таблицу так что бы каскадом удалась запись из BlacklistUsers

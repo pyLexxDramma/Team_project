@@ -4,8 +4,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from urllib.parse import urlparse
 from config import *
 from datetime import datetime, timedelta, timezone
-from models import*
-from create_db import *
+from VKinder_db.models import *
+from VKinder_db.create_db import *
 from sqlalchemy.exc import SQLAlchemyError  # Import SQLAlchemyError
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

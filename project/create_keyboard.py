@@ -158,7 +158,7 @@ def keyboard_favorites_list(user_id, fav_id):
                         "label": "❌ Удалить",
                         "payload": {
                             "action": "remove_from_favorites",
-                            "user_id": user_id
+                            "user_id": fav_id
                         }
                     },
                     "color": "negative"
@@ -169,7 +169,7 @@ def keyboard_favorites_list(user_id, fav_id):
                         "label": "🚫 В ЧС",
                         "payload": {
                             "action": "add_blacklist",
-                            "user_id": user_id
+                            "user_id": fav_id
                         }
                     },
                     "color": "primary"

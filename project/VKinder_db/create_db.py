@@ -3,14 +3,14 @@ from sqlalchemy.orm import sessionmaker
 import os
 from sqlalchemy import exists
 from sqlalchemy.exc import SQLAlchemyError
-from models import *
+from VKinder_db.models import *
 from dotenv import load_dotenv
 
 
 load_dotenv()
 
 def create_tables(engine):
-    Base.metadata.drop_all(engine)
+    # Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
 
 '''
@@ -231,7 +231,7 @@ def delete_favourite(vk_id, user_id):
 
             session.commit()
             session.close()
-            return 'Профиль удалён из списка избранного'
+            return 'Успешно, профиль удалён из списка избранного'
     except SQLAlchemyError as e :
         return (f'Ошибка при удалении из списка избранного {e}')
 
@@ -255,6 +255,6 @@ def delete_blacklist(vk_id, user_id):
 
             session.commit()
             session.close()
-            return 'Профиль удалён из чёрного списка'
+            return 'Успешно, профиль удалён из чёрного списка'
     except SQLAlchemyError as e :
         return (f'Ошибка при удалении из чёрного списка {e}')
